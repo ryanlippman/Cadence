@@ -15,6 +15,7 @@ let package = Package(
         ),
         .executableTarget(name: "Cadence", dependencies: ["CadenceCore"]),
         .executableTarget(name: "cadence-render", dependencies: ["CadenceCore"]),
+        .executableTarget(name: "cadence-analyze", dependencies: ["CadenceCore"]),
         .testTarget(name: "CadenceCoreTests", dependencies: ["CadenceCore"]),
     ]
 )

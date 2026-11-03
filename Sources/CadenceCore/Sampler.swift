@@ -32,6 +32,7 @@ public final class Sampler {
     var voices: [Voice]
     let releaseCoef: Float
     public static let maxVoices = 64
+    public var stealCount = 0
 
     public init(bank: SampleBank, sampleRate: Double) {
         self.bank = bank
@@ -55,6 +56,7 @@ public final class Sampler {
         var slot = voices.firstIndex { !$0.active }
         if slot == nil {
             slot = voices.indices.max { voices[$0].age < voices[$1].age } // steal oldest
+            stealCount += 1
         }
         guard let s = slot else { return }
         voices[s] = Voice(active: true, delay: delay, lo: sel.lo, hi: sel.hi, gLo: gLo, gHi: gHi,

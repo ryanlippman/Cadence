@@ -9,8 +9,8 @@ public final class SampleZone {
     public let sampleRate: Double
     /// RMS of the first 0.3 s (used to normalise layers so loudness follows velocity smoothly).
     public var attackRMS: Float = 0.05
-    let left: UnsafeMutablePointer<Int16>
-    let right: UnsafeMutablePointer<Int16>
+    public let left: UnsafeMutablePointer<Int16>
+    public let right: UnsafeMutablePointer<Int16>
 
     init(centerMidi: Int, layerVelocity: Int, frames: Int, sampleRate: Double,
          left: UnsafeMutablePointer<Int16>, right: UnsafeMutablePointer<Int16>) {

@@ -53,6 +53,8 @@ public final class SynthCore {
     private static let maxBlock = 1024
 
     public private(set) var outputPeak: Float = 0
+    public var debugSteals: Int { sampler.stealCount }
+    public var debugVoices: Int { sampler.activeVoiceCount }
     public private(set) var fadeFinished = false
     public private(set) var currentKeyName = ""
     public private(set) var currentTempo = 0.0
