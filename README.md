@@ -63,8 +63,9 @@ Regenerating the sample subset: `Scripts/prepare_samples.sh <extracted Salamande
 - **Subjective listening quality** (musicality, reverb taste, loudness) has not been judged by a human ear.
 - The window/menu-bar **UI was not visually inspected** in this environment (no screen-capture permission);
   it compiles, launches, and the self-test confirmed the audio engine produced non-silent output.
+- Sleep prevention was confirmed with `pmset -g assertions` (PreventUserIdleSystemSleep "Cadence is playing").
 - **Media keys / Now Playing** are implemented with `MPRemoteCommandCenter`/`MPNowPlayingInfoCenter` but were
-  not exercised with a physical keyboard. Sleep prevention was not independently checked with `pmset -g assertions`.
+  not exercised with a physical keyboard.
 - The app is ad-hoc signed only (no notarization); Gatekeeper may require right-click → Open.
 - No custom app icon yet.
 
