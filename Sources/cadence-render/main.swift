@@ -1,30 +1,24 @@
 import Foundation
 import CadenceCore
 
-// Stage 1 smoke tool: renders a short arpeggio through sampler + reverb to a WAV file.
-let out = CommandLine.arguments.dropFirst().first ?? "stage1.wav"
+// Usage: cadence-render [--mode focus|relax|sleep] [--seconds N] [--no-am] [--noise] [--seed N] [--rate HZ] out.wav
+var args = Array(CommandLine.arguments.dropFirst())
+var p = EngineParams()
+var seconds = 60.0
+var seed: UInt64 = 1
+var out = "cadence.wav"
+func take(_ k: String) -> String? { if let i = args.firstIndex(of: k), i + 1 < args.count { let v = args[i + 1]; args.removeSubrange(i...(i + 1)); return v }; return nil }
+if let m = take("--mode"), let mode = FocusMode(rawValue: m) { p.mode = mode; p.rateHz = mode.defaultRate }
+if let s = take("--seconds"), let d = Double(s) { seconds = d }
+if let s = take("--seed"), let d = UInt64(s) { seed = d }
+if let s = take("--rate"), let d = Double(s) { p.rateHz = d }
+if let i = args.firstIndex(of: "--no-am") { p.amEnabled = false; args.remove(at: i) }
+if let i = args.firstIndex(of: "--noise") { p.noiseEnabled = true; args.remove(at: i) }
+if let f = args.first { out = f }
 let sr = 44100.0
-let bank = try SampleBank.loadBundled()
-print("Loaded \(bank.zones.count) sample zones, centers \(bank.centers.first!)…\(bank.centers.last!)")
-let sampler = Sampler(bank: bank, sampleRate: sr)
-let reverb = Reverb(sampleRate: sr)
-let total = Int(sr * 10)
-var L = [Float](repeating: 0, count: total), R = L
-let notes = [48, 55, 60, 64, 67, 64, 60, 55]
-var pending: [(Int, Int)] = notes.enumerated().map { (Int(Double($0.offset) * 0.5 * sr), $0.element) }
-let block = 512
-var pos = 0
-L.withUnsafeMutableBufferPointer { lp in R.withUnsafeMutableBufferPointer { rp in
-    while pos < total {
-        let n = min(block, total - pos)
-        while let f = pending.first, f.0 < pos + n {
-            sampler.noteOn(midi: f.1, velocity: 50, holdSamples: Int(sr * 3), delay: f.0 - pos)
-            pending.removeFirst()
-        }
-        sampler.render(outL: lp.baseAddress! + pos, outR: rp.baseAddress! + pos, frames: n)
-        reverb.process(left: lp.baseAddress! + pos, right: rp.baseAddress! + pos, frames: n, wet: 0.2)
-        pos += n
-    }
-}}
-try WAV.write(left: L, right: R, sampleRate: Int(sr), to: URL(fileURLWithPath: out))
-print("Wrote \(out); peak \(max(L.map(abs).max()!, R.map(abs).max()!))")
+let core = SynthCore(bank: try SampleBank.loadBundled(), sampleRate: sr, seed: seed)
+core.setParams(p)
+core.startSession(fadeInSeconds: 1)
+let (l, r) = core.renderOffline(seconds: seconds)
+try WAV.write(left: l, right: r, sampleRate: Int(sr), to: URL(fileURLWithPath: out))
+print("Wrote \(out): \(seconds)s, mode \(p.mode.rawValue), AM \(p.amEnabled ? "\(p.rateHz) Hz" : "off"), key \(core.currentKeyName)")
