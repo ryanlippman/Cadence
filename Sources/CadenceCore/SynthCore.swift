@@ -177,14 +177,14 @@ public final class SynthCore {
         amElapsed += Double(n) / sr
 
         let fadeStep = 1 / (fadeSeconds * sr)
-        let noiseTarget = p.noiseEnabled ? p.noiseLevel * 0.35 : 0
+        let noiseTarget = p.noiseEnabled ? p.noiseLevel * 0.2 : 0
         var peak: Float = 0
         for i in 0..<n {
             volumeS += (p.volume - volumeS) * 0.002
             noiseGain += (noiseTarget - noiseGain) * 0.0002
             if fadeLevel < fadeTarget { fadeLevel = min(fadeTarget, fadeLevel + fadeStep) }
             else if fadeLevel > fadeTarget { fadeLevel = max(fadeTarget, fadeLevel - fadeStep) }
-            let g = Float(volumeS * fadeLevel * fadeLevel)
+            let g = Float(volumeS * fadeLevel * fadeLevel) * 2.5   // output trim (piano samples are quiet)
             let ng = Float(noiseGain)
             let l = (dryL[i] + noiseL.next() * ng) * g
             let r = (dryR[i] + noiseR.next() * ng) * g
