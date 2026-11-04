@@ -9,6 +9,10 @@ struct MenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
+                if player.isPlaying, let piece = player.piece {
+                    Image(nsImage: Artwork.image(for: piece, size: 160)).resizable().frame(width: 36, height: 36)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous)).accessibilityHidden(true)
+                }
                 Button(action: player.toggle) {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
@@ -18,8 +22,8 @@ struct MenuBarView: View {
                 .buttonStyle(.plain).disabled(player.isLoading)
                 .accessibilityLabel(player.isPlaying ? "Stop" : "Start")
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(player.isPlaying ? "\(player.settings.mode.title) · \(player.status.style.title)" : "Cadence")
-                        .font(.headline)
+                    Text(player.isPlaying ? (player.piece?.name ?? "\(player.settings.mode.title) · \(player.status.style.title)") : "Cadence")
+                        .font(.headline).lineLimit(1)
                     Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()

@@ -233,3 +233,64 @@ public final class Limiter {
         }
     }
 }
+
+/// Headphone externalisation: a gentle crossfeed (each ear hears a delayed, low-passed copy of the other
+/// channel, as with loudspeakers in a room) plus a few sparse early reflections, so the piano sits out
+/// in front of the listener instead of inside the head. On loudspeakers the effect is subtle and harmless.
+/// `amount` (0...1) is smoothed per sample, so toggling never clicks.
+public final class Externalizer {
+    private let sampleRate: Double
+    private let size = 4096
+    private let bufL: UnsafeMutablePointer<Float>
+    private let bufR: UnsafeMutablePointer<Float>
+    private var w = 0
+    private var lpL: Float = 0, lpR: Float = 0
+    private let lpCoef: Float
+    private let cross: Int
+    private let taps: [(dl: Int, dr: Int, g: Float)]
+    private var amountS: Float = 0
+
+    public init(sampleRate: Double) {
+        self.sampleRate = sampleRate
+        bufL = allocZeroed(4096); bufR = allocZeroed(4096)
+        lpCoef = Float(1 - exp(-2 * Double.pi * 700 / sampleRate))
+        cross = Int(0.00028 * sampleRate)   // interaural delay ≈ 0.28 ms
+        // early reflections, slightly different per ear (ms), decaying
+        let ms: [(Double, Double, Float)] = [(7.1, 8.3, 0.16), (11.9, 10.7, 0.12), (17.3, 19.1, 0.09), (23.9, 22.4, 0.06)]
+        taps = ms.map { (Int($0.0 * sampleRate / 1000), Int($0.1 * sampleRate / 1000), $0.2) }
+    }
+    deinit { bufL.deallocate(); bufR.deallocate() }
+
+    public func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>, frames: Int, amount: Float) {
+        if amount == 0 && amountS < 1e-5 {
+            // keep the delay lines current so switching on starts cleanly
+            for i in 0..<frames { bufL[w] = left[i]; bufR[w] = right[i]; w = (w + 1) & (size - 1) }
+            amountS = 0
+            return
+        }
+        let mask = size - 1
+        let crossGain: Float = 0.32
+        // keep the overall level steady: crossfeed and reflections add energy
+        let norm: Float = 1 / (1 + crossGain * 0.45 + 0.12)
+        for i in 0..<frames {
+            amountS += (amount - amountS) * 0.0005
+            let xl = left[i], xr = right[i]
+            bufL[w] = xl; bufR[w] = xr
+            let dL = bufL[(w - cross) & mask], dR = bufR[(w - cross) & mask]
+            lpL += (dL - lpL) * lpCoef
+            lpR += (dR - lpR) * lpCoef
+            var yl = xl + crossGain * lpR
+            var yr = xr + crossGain * lpL
+            for t in taps {
+                // reflections arrive from the side opposite their ear's delay, mixed mono-ish
+                let m = 0.5 * (bufL[(w - t.dl) & mask] + bufR[(w - t.dl) & mask])
+                let n = 0.5 * (bufL[(w - t.dr) & mask] + bufR[(w - t.dr) & mask])
+                yl += t.g * m; yr += t.g * n
+            }
+            yl *= norm; yr *= norm
+            left[i] = xl + (yl - xl) * amountS
+            right[i] = xr + (yr - xr) * amountS
+            w = (w + 1) & mask
+        }
+    }
+}

@@ -64,6 +64,12 @@ public final class Composer {
     private var lastVoicing: Voicing?
     private var lastChord: Chord?
     private var lastMelody = 72
+    /// Last few melody pitches heard (oldest first), so phrase joins can be smoothed.
+    private var melHistory: [Int] = []
+    private var lastMelVel: Double?
+    private var lastMelodyNeedsStep = false
+    private var lastBass: Int?
+    private var lastBarNotes: Int?
     private var tempoNow: Double
     private var tempoDrift = 0.0
     private var barIndex = 0
@@ -349,7 +355,17 @@ public final class Composer {
         emit(plan: ext, voicings: v2, melody: m2, fig: fig, section: section, role: .cadentialExtension)
     }
 
-    private func emit(plan: PhrasePlan, voicings: [Voicing], melody: [MelNote], fig: Figuration, section: String, role: PhraseRole) {
+    private func emit(plan: PhrasePlan, voicings: [Voicing], melody rawMelody: [MelNote], fig: Figuration, section: String, role: PhraseRole) {
+        var melody = rawMelody
+        let mr = melodyRange
+        let wide = (mr.lowerBound - 2)...(mr.upperBound + 2)
+        if let pb = lastBass, let pm = melHistory.last {
+            melodist.fixJoinParallel(&melody, plan: plan, voicings: voicings, prevMelody: pm, prevBass: pb,
+                                     needsStep: lastMelodyNeedsStep, range: mr)
+        }
+        melodist.polish(&melody, plan: plan, history: melHistory, historyNeedsStep: lastMelodyNeedsStep, range: wide)
+        melodist.fixParallels(&melody, plan: plan, voicings: voicings, range: mr)
+        melodist.resolveDissonances(&melody, plan: plan, range: wide)
         var all: [(MelNote, VoiceRole)] = melody.map { ($0, .melody) }
         if fig == .walking {
             all += melodist.walkingBass(plan: plan, voicings: voicings, density: density).map { ($0, .bass) }
@@ -359,8 +375,21 @@ public final class Composer {
         if fig == .walking || (density >= 0.8 && dice.chance(profile.counterVoiceProb)) {
             all += melodist.counterVoice(plan: plan, voicings: voicings, melody: melody, density: density, range: 55...71).map { ($0, .counter) }
         }
+        // warmth: lyrical styles sometimes double a long melody note a third or sixth below
+        if style == .romantic || style == .impressionist {
+            for n in melody where n.structural && n.kind == .chordTone && n.dur >= 1.5 && dice.chance(0.3) {
+                let chord = plan.slot(at: n.beat).chord
+                let taken = Set(all.filter { $0.0.beat < n.end - 1e-9 && $0.0.end > n.beat + 1e-9 }.map { $0.0.midi })
+                if let d = [n.midi - 3, n.midi - 4, n.midi - 8, n.midi - 9].first(where: { chord.pcs.contains(mod12($0)) && !taken.contains($0) && $0 >= 57 }) {
+                    all.append((MelNote(beat: n.beat, dur: n.dur, midi: d, kind: .chordTone, structural: false), .counter))
+                }
+            }
+        }
         let pedal = Texture.pedal(plan: plan, style: profile.pedal, dice: dice)
         if let last = melody.last { lastMelody = last.midi }
+        melHistory = Array((melHistory + melody.map { $0.midi }).suffix(3))
+        lastBass = voicings.last?.bass
+        lastMelodyNeedsStep = melody.last.map { $0.kind.isDissonantByDesign || $0.kind == .suspension } ?? false
         currentKey = plan.endKey
 
         // tempo: glide toward a slowly drifting target inside the mode's range
@@ -373,6 +402,8 @@ public final class Composer {
             target = start + (target - start) * a.tempoBlend
         }
         let arcSoft = (1 - (arc?.energy ?? 1)) * 0.08
+        // large-scale dynamics: the contrasting section and codetta a little softer, the return a little fuller
+        let sectionLift: Double = ["Contrast": -1.5, "Transition": -1, "Return": 1, "Codetta": -2.5, "Theme, varied": 0.5][section] ?? 0
 
         let vr = mode.profile.velocityRange
         let lo = Double(vr.lowerBound), span = Double(vr.upperBound - vr.lowerBound)
@@ -384,6 +415,7 @@ public final class Composer {
             tempoNow += max(-1.2, min(1.2, step))
             var tempo = tempoNow
             if bar == plan.bars - 1 { tempo *= profile.ritardando }
+            else { tempo = min(tr.upperBound, tempo * (1 + 0.012 * sin(.pi * Double(bar) / Double(plan.bars)))) }   // gentle phrase rubato
             tempo = min(80, max(55, tempo))
             var notes: [GeneratedNote] = []
             for (n, role) in all where n.beat >= b0 - 1e-9 && n.beat < b1 - 1e-9 {
@@ -393,7 +425,7 @@ public final class Composer {
                 switch role { case .melody: base = 0.6; case .counter: base = 0.42; case .bass: base = 0.42; case .inner: base = 0.27 }
                 var v = lo + span * (base + 0.12 * arch - arcSoft)
                 switch n.kind {
-                case .ornament: v -= 5
+                case .ornament: v -= 3
                 case .resolution: v -= 2
                 case .appoggiatura, .suspension: v += 1.5
                 default: break
@@ -401,10 +433,39 @@ public final class Composer {
                 if role == .melody && n.structural { v += 1.5 }
                 if abs(n.beat - b0) < 1e-6 && role != .melody { v += 1 }
                 if bar == plan.bars - 1 && n.beat >= total - B { v -= 2 }
-                v += dice.gauss() * 1.2
+                v += dice.gauss() * 1.2 + sectionLift
+                if role == .melody {
+                    // no sudden accents: each melody note within ±6 of the one before
+                    if let lv = lastMelVel { v = min(lv + 6, max(lv - 6, v)) }
+                    lastMelVel = v
+                }
                 let vel = min(vr.upperBound, max(vr.lowerBound, Int(v.rounded())))
                 notes.append(GeneratedNote(beat: n.beat - b0, durBeats: n.dur, midi: n.midi, velocity: vel, voice: role, kind: n.kind))
             }
+            // texture density changes gradually: the first bar of a phrase meets the previous bar halfway
+            if bar == 0, let last = lastBarNotes {
+                let hiLimit = max(Int(Double(last) * 1.6), last + 4)
+                if notes.count > hiLimit {
+                    var drop = notes.count - hiLimit
+                    for idx in notes.indices.reversed() where drop > 0 {
+                        if (notes[idx].voice == .inner || notes[idx].voice == .counter) && notes[idx].beat > 1e-6 {
+                            notes[idx].midi = -1; drop -= 1
+                        }
+                    }
+                    notes.removeAll { $0.midi < 0 }
+                }
+                let loLimit = min(Int(Double(last) / 1.6), last - 4)
+                if notes.count < loLimit, let v = voicings.first {
+                    // fill empty beats with a soft inner chord tone
+                    for beat in 0..<plan.beatsPerBar where notes.count < loLimit {
+                        let t = Double(beat)
+                        if notes.contains(where: { abs($0.beat - t) < 1e-6 }) { continue }
+                        let p = v.upper[0]
+                        notes.append(GeneratedNote(beat: t, durBeats: 1, midi: p, velocity: max(vr.lowerBound, Int(lo + span * 0.25)), voice: .inner, kind: .accompaniment))
+                    }
+                }
+            }
+            lastBarNotes = notes.count
             let chords = plan.slots.filter { $0.start < b1 - 1e-9 && $0.end > b0 + 1e-9 }.map {
                 BarChord(beat: max(0, $0.start - b0), length: $0.length, chord: $0.chord, key: $0.key, scale: $0.scale)
             }

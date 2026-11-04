@@ -27,6 +27,18 @@ public struct CompositionReport: Sendable {
     public var velocityRange: ClosedRange<Int> = 0...0
     public var uniqueFourBarWindows = 0.0
     public var styles: Set<CompositionStyle> = []
+    // --- salience (attention-grabbing events; all should be rare) ---
+    /// Consecutive melody notes whose velocity differs by more than 8.
+    public var velocityJumps = 0
+    public var maxVelocityJump = 0
+    /// Bar-to-bar changes in note count of more than ×2 and more than 6 notes.
+    public var densityJumps = 0
+    /// Moments (> 1 beat) where nothing is sounding (ignoring pedal and reverb).
+    public var silentGaps = 0
+    /// Melody notes above C6.
+    public var registerPeaks = 0
+    /// Accompaniment notes struck louder than the melody note sounding at the time.
+    public var maskedMelody = 0
 }
 
 public enum CompositionAnalysis {
@@ -38,7 +50,9 @@ public enum CompositionAnalysis {
         var tmin = Double.infinity, tmax = -Double.infinity, vmin = 127, vmax = 0
         var symbols = Set<String>()
         // absolute melody list and chord-change list
-        struct M { var t: Double; var midi: Int; var nct: Bool }
+        struct M { var t: Double; var midi: Int; var nct: Bool; var vel: Int }
+        var lastCount: Int? = nil
+        var soundingUntil = 0.0
         var melody: [M] = []
         var changes: [(t: Double, bass: Int?, mel: Int?)] = []
         var beatOffset = 0.0
@@ -63,10 +77,23 @@ public enum CompositionAnalysis {
                 if !inChord && !bc.scale.pcs.contains(pc) && !bc.key.contains(pc) { r.outOfKey += 1 }
                 if !bc.key.contains(pc) { r.chromatic += 1 }
                 if n.voice == .melody {
-                    melody.append(M(t: beatOffset + n.beat, midi: n.midi, nct: !inChord))
+                    melody.append(M(t: beatOffset + n.beat, midi: n.midi, nct: !inChord, vel: n.velocity))
+                    if n.midi > 84 { r.registerPeaks += 1 }
                     cur.append(n.midi)
                 }
             }
+            for n in b.notes.sorted(by: { $0.beat < $1.beat }) {
+                let t = beatOffset + n.beat
+                if t - soundingUntil > 1.0 && soundingUntil > 0 { r.silentGaps += 1 }
+                soundingUntil = max(soundingUntil, t + n.durBeats)
+            }
+            for n in b.notes where n.voice != .melody {
+                if let m = b.notes.last(where: { $0.voice == .melody && $0.beat <= n.beat + 1e-6 && $0.beat + $0.durBeats > n.beat }),
+                   n.velocity > m.velocity + 2 { r.maskedMelody += 1 }
+            }
+            let cnt = b.notes.count * 4 / max(1, b.beats)
+            if let lc = lastCount, max(cnt, lc) > 2 * min(cnt, lc), abs(cnt - lc) > 6 { r.densityJumps += 1 }
+            lastCount = cnt
             for c in b.chords where c.beat >= 0 {
                 let t = beatOffset + c.beat
                 let bass = b.notes.filter { $0.voice == .bass && abs($0.beat - c.beat) < 0.15 }.map { $0.midi }.min()
@@ -94,6 +121,9 @@ public enum CompositionAnalysis {
                 sumInt += d
                 r.maxMelodicLeap = max(r.maxMelodicLeap, d)
                 if d > 9 { r.melodicLeapsOverSixth += 1 }
+                let dv = abs(melody[i].vel - melody[i - 1].vel)
+                r.maxVelocityJump = max(r.maxVelocityJump, dv)
+                if dv > 8 { r.velocityJumps += 1 }
                 run = d == 0 ? run + 1 : 0
                 if run == 2 { r.staticRepeats += 1 }
             }

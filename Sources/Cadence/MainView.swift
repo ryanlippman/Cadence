@@ -16,6 +16,17 @@ struct MainView: View {
                 stylePicker
                 VStack(spacing: 10) {
                     LabeledSlider(title: "Intensity", systemImage: "waveform.path", value: $player.settings.intensity)
+                    HStack(spacing: 10) {
+                        Image(systemName: "bolt.horizontal").foregroundStyle(.secondary).frame(width: 18).accessibilityHidden(true)
+                        Text("Strength").frame(width: 74, alignment: .leading)
+                        Picker("Modulation strength", selection: $player.settings.strength) {
+                            ForEach(ModStrength.allCases) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.segmented).labelsHidden()
+                        .help("Strong suits people who find the standard effect too subtle")
+                    }
+                    .font(.callout)
+                    .disabled(!player.settings.amEnabled)
                     LabeledSlider(title: "Volume", systemImage: "speaker.wave.2", value: $player.settings.volume)
                 }
                 sessionRow
@@ -24,7 +35,7 @@ struct MainView: View {
             Spacer(minLength: 12)
             footer.padding(.bottom, 14)
         }
-        .frame(width: 420, height: 604)
+        .frame(width: 420, height: 640)
         .background(.background)
         .tint(player.settings.mode.tint)
         .animation(.easeInOut(duration: 0.35), value: player.settings.mode)
@@ -33,7 +44,33 @@ struct MainView: View {
         .onAppear { if !player.settings.onboarded { showOnboarding = true } }
     }
 
-    private var header: some View {
+    @ViewBuilder private var header: some View {
+        if player.isPlaying, let piece = player.piece, player.errorMessage == nil {
+            HStack(spacing: 12) {
+                Image(nsImage: Artwork.image(for: piece, size: 160))
+                    .resizable().frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(piece.name).font(.system(size: 19, weight: .medium, design: .serif)).lineLimit(1)
+                    Text("\(piece.subtitle) · \(player.status.section)")
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 26)
+            .frame(height: 56)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.6), value: piece)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Now playing: \(piece.name), \(piece.subtitle)")
+        } else {
+            plainHeader.frame(height: 56)
+        }
+    }
+
+    private var plainHeader: some View {
         VStack(spacing: 4) {
             Text("Cadence").font(.system(size: 24, weight: .medium, design: .serif))
             Text(statusLine)

@@ -152,21 +152,31 @@ final class MelodyComposer {
             let bass = voicings[si].bass
             let isFinal = i == lastStruct
             let isPenult = k == structIdx.count - 2
-            var cands = (lo...hi).filter { chord.pcs.contains(mod12($0)) }
+            // cadence notes may reach a step outside the range rather than force a wide leap
+            var cands = ((isFinal || isPenult ? lo - 2 : lo)...(isFinal || isPenult ? hi + 2 : hi)).filter { chord.pcs.contains(mod12($0)) }
+            if !(isFinal || isPenult) { cands = cands.filter { range.contains($0) } }
+            if cands.isEmpty { cands = (lo...hi).filter { chord.pcs.contains(mod12($0)) } }
+            // a preferred cadence pitch is used only if it is reachable without a leap of more than a fifth
+            func near(_ f: [Int]) -> Bool { f.contains { abs($0 - prev) <= 7 } }
             if isPenult && plan.cadence == .authentic && chord.function == .dominant {
                 let f = cands.filter { [finalKey.pc(1), finalKey.pc(6)].contains(mod12($0)) }   // 2̂ or 7̂ → 1̂
-                if !f.isEmpty { cands = f }
+                if near(f) { cands = f }
             }
             if isFinal {
                 switch plan.cadence {
                 case .authentic, .plagal, .deceptive:
                     let want = role == .antecedent && dice.chance(0.25) ? finalKey.pc(2) : finalKey.tonic
                     let f = cands.filter { mod12($0) == want }
-                    if !f.isEmpty { cands = f } else { cands = cands.filter { mod12($0) == finalKey.tonic }.isEmpty ? cands : cands.filter { mod12($0) == finalKey.tonic } }
+                    let tonic = cands.filter { mod12($0) == finalKey.tonic }
+                    let third = cands.filter { mod12($0) == finalKey.pc(2) }
+                    if near(f) { cands = f }
+                    else if near(tonic) { cands = tonic }
+                    else if near(third) { cands = third }     // an imperfect close beats a wide leap
+                    else if !tonic.isEmpty { cands = tonic }
                 case .half:
                     let pref = Set([finalKey.pc(1), finalKey.pc(6), finalKey.pc(4)])
                     let f = cands.filter { pref.contains(mod12($0)) }
-                    if !f.isEmpty { cands = f }
+                    if near(f) { cands = f }
                 case .open: break
                 }
             }
@@ -177,7 +187,7 @@ final class MelodyComposer {
             for m in cands {
                 var c = abs(Double(m) - target(n.beat)) * 0.32
                 let d = abs(m - prev)
-                let table: [Double] = [profile.style == .minimalist ? 0.4 : 1.1, 0.05, 0.0, 0.35, 0.45, 1.1, 6, 1.8, 3.0, 3.5, 6, 7, 5]
+                let table: [Double] = [profile.style == .minimalist ? 0.4 : 1.1, 0.05, 0.0, 0.35, 0.45, 1.1, 6, 1.8, 3.0, 3.5, 8, 9, 5]
                 c += d <= 12 ? table[d] : 9
                 if d == 0 { c += Double(repeats) * 2.0 }   // no static note-repetition
                 if let w = dirWanted, w != 0, (m - prev).signum() != w { c += 1.6 }
@@ -276,7 +286,7 @@ final class MelodyComposer {
                 if idx >= max(1, prefix.count), n.structural, n.kind == .chordTone, n.dur >= 2, dice.chance(profile.appoggiaturaProb) {
                     let slot = plan.slot(at: n.beat)
                     let u = slot.scale.step(from: n.midi, by: 1)
-                    if !slot.chord.pcs.contains(mod12(u)), u <= hi + 1, abs(u - (out.last?.midi ?? u)) <= 7 {
+                    if !slot.chord.pcs.contains(mod12(u)), u <= hi + 1, abs(u - (out.last?.midi ?? u)) <= 7, u != out.last?.midi {
                         out.append(MelNote(beat: n.beat, dur: n.dur / 2, midi: u, kind: .appoggiatura, structural: true))
                         out.append(MelNote(beat: n.beat + n.dur / 2, dur: n.dur / 2, midi: n.midi, kind: .resolution, structural: true))
                         continue
@@ -316,6 +326,61 @@ final class MelodyComposer {
         // leads into newly composed material): every dissonance resolves by step
         resolveDissonances(&notes, plan: plan, range: (lo - 2)...(hi + 2), from: 0)
         return notes
+    }
+
+    /// Final smoothing of a phrase as it will be heard, including where it joins the previous phrase
+    /// (`history`: the last melody pitches already played, oldest first). Removes the most
+    /// attention-grabbing irregularities: three identical pitches in a row, and leaps wider than a sixth
+    /// into a weak chord tone. Notes before `from` (restated material) are left alone.
+    func polish(_ notes: inout [MelNote], plan: PhrasePlan, history: [Int], historyNeedsStep: Bool = false,
+                range: ClosedRange<Int>, from: Int = 0) {
+        guard !notes.isEmpty else { return }
+        func pitch(_ k: Int) -> Int? {   // k indexes history + notes
+            k < 0 ? nil : (k < history.count ? history[k] : (k - history.count < notes.count ? notes[k - history.count].midi : nil))
+        }
+        func replace(_ i: Int, avoid: Int) -> Bool {
+            let n = notes[i]
+            guard n.kind == .chordTone || n.kind == .anticipation else { return false }
+            let slot = plan.slot(at: n.beat)
+            let prevP = pitch(history.count + i - 1) ?? n.midi
+            let nextP = i + 1 < notes.count ? notes[i + 1].midi : nil
+            let nextNCT = i + 1 < notes.count && !plan.slot(at: notes[i + 1].beat).chord.pcs.contains(mod12(notes[i + 1].midi))
+            // the first note may be the resolution of the previous phrase's last note: stay within a step
+            let opts = range.filter { x in
+                slot.chord.pcs.contains(mod12(x)) && x != avoid && abs(x - n.midi) <= 5 && abs(x - prevP) <= (i == 0 && historyNeedsStep ? 2 : 7)
+                    && (nextP == nil || abs(x - nextP!) <= (nextNCT ? 2 : 7))
+            }
+            let aim = Double(prevP + (nextP ?? prevP)) / 2
+            guard let x = opts.min(by: { abs(Double($0) - aim) < abs(Double($1) - aim) }) else { return false }
+            notes[i].midi = x
+            notes[i].kind = .chordTone
+            return true
+        }
+        let start = max(from, 0)
+        // 1) static runs
+        var i = start
+        while i < notes.count {
+            let k = history.count + i
+            if let a = pitch(k - 2), let b = pitch(k - 1), a == b, b == notes[i].midi {
+                // change this note, or (for a phrase-final note) the one before it
+                let order = i == notes.count - 1 ? [i - 1, i - 2, i] : [i, i - 1, i - 2]
+                for j in order where j >= start && j < notes.count {
+                    if replace(j, avoid: b) { break }
+                }
+            }
+            i += 1
+        }
+        // 2) wide leaps into chord tones (including across the phrase join): move the target note by an
+        //    octave when that is closer; the pitch class, and so the harmony, is unchanged
+        for i in start..<notes.count where notes[i].kind == .chordTone {
+            guard let p = pitch(history.count + i - 1) else { continue }
+            let d = notes[i].midi - p
+            guard abs(d) > 9 else { continue }
+            let alt = notes[i].midi - 12 * d.signum()
+            let nextOK = i + 1 >= notes.count || abs(notes[i + 1].midi - alt) <= max(7, abs(notes[i + 1].midi - notes[i].midi))
+            if range.contains(alt) && nextOK && abs(alt - p) < abs(d) { notes[i].midi = alt }
+        }
+        resolveDissonances(&notes, plan: plan, range: range, from: 0)
     }
 
     /// Any note that is not a chord tone at its onset must move by step (≤ 2 semitones) to the next
@@ -365,6 +430,26 @@ final class MelodyComposer {
             }.sorted { abs($0 - m) < abs($1 - m) }
             if let x = opts.first { notes[i1].midi = x }
         }
+    }
+
+    /// Parallel fifths/octaves between the outer voices across a phrase join (previous phrase's last
+    /// melody note and bass → this phrase's first chord).
+    func fixJoinParallel(_ notes: inout [MelNote], plan: PhrasePlan, voicings: [Voicing], prevMelody pm: Int, prevBass pb: Int,
+                         needsStep: Bool, range: ClosedRange<Int>) {
+        guard let i = notes.lastIndex(where: { $0.beat <= 0.3 }), !voicings.isEmpty else { return }
+        let m = notes[i].midi, b = voicings[0].bass
+        guard pm != m, pb != b else { return }
+        let a = mod12(pm - pb)
+        guard a == mod12(m - b), a == 0 || a == 7, (m - pm).signum() == (b - pb).signum(), notes[i].kind == .chordTone else { return }
+        let chord = plan.slot(at: notes[i].beat).chord
+        let nextP = i + 1 < notes.count ? notes[i + 1].midi : nil
+        let nextNCT = i + 1 < notes.count && !plan.slot(at: notes[i + 1].beat).chord.pcs.contains(mod12(notes[i + 1].midi))
+        let opts = range.filter { x in
+            chord.pcs.contains(mod12(x)) && x != m && abs(x - m) <= 5 && abs(x - pm) <= (needsStep ? 2 : 7)
+                && !(mod12(x - b) == a && (x - pm).signum() == (b - pb).signum())
+                && (nextP == nil || abs(x - nextP!) <= (nextNCT ? 2 : 7))
+        }.sorted { abs($0 - m) < abs($1 - m) }
+        if let x = opts.first { notes[i].midi = x }
     }
 
     /// Light variation for recalled phrases: added passing tones between structural thirds.

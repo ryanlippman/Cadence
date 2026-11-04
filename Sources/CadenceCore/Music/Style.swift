@@ -76,7 +76,7 @@ public struct StyleProfile: Sendable {
             return StyleProfile(
                 style: s, beatsPerBar: [4], phraseBars: 4, chordsPerBar: 1,
                 figurations: [.rolled, .nocturne], modes: [.lydian, .ionian, .mixolydian, .dorian],
-                melodyRange: 65...84, climaxSpan: 4...8,
+                melodyRange: 65...82, climaxSpan: 4...8,
                 secondaryDominantProb: 0.05, borrowedProb: 0.25, seventhProb: 0.75, added9Prob: 0.35,
                 sequenceProb: 0.2, suspensionProb: 0.25, appoggiaturaProb: 0.15, ornamentProb: 0.05,
                 counterVoiceProb: 0.15, cadential64Prob: 0, plagalProb: 0.55, deceptiveProb: 0.15,
@@ -90,7 +90,7 @@ public struct StyleProfile: Sendable {
             return StyleProfile(
                 style: s, beatsPerBar: [4], phraseBars: 4, chordsPerBar: 1,
                 figurations: [.nocturne, .alberti], modes: [.ionian, .aeolian, .ionian],
-                melodyRange: 65...84, climaxSpan: 5...9,
+                melodyRange: 65...82, climaxSpan: 5...9,
                 secondaryDominantProb: 0.3, borrowedProb: 0.15, seventhProb: 0.35, added9Prob: 0.05,
                 sequenceProb: 0.15, suspensionProb: 0.35, appoggiaturaProb: 0.25, ornamentProb: 0.12,
                 counterVoiceProb: 0.35, cadential64Prob: 0.5, plagalProb: 0.1, deceptiveProb: 0.15,

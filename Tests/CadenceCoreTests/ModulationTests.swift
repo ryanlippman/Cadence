@@ -131,4 +131,64 @@ final class ModulationTests: XCTestCase {
         let rel = AudioAnalysis.db(noise) - AudioAnalysis.db(music)
         XCTAssertTrue((-30.0)...(-10.0) ~= rel, "noise sits well below the music (\(rel) dB)")
     }
+
+    // MARK: new options
+
+    private func run(_ w: ModWaveform, stereo: ModStereo = .together, band: ModBand = .full, seconds: Double = 20,
+                     signal: (Int) -> Float = { _ in 0.5 }) -> (l: [Float], r: [Float]) {
+        let n = Int(sr * seconds)
+        var l = (0..<n).map(signal), r = l
+        let am = ModulationStage(sampleRate: sr, initialRate: 16)
+        l.withUnsafeMutableBufferPointer { lp in r.withUnsafeMutableBufferPointer { rp in
+            am.process(left: lp.baseAddress!, right: rp.baseAddress!, frames: n, rate: 16, depth: 0.5, waveform: w,
+                       stereo: stereo, band: band, ramp: { _ in 1 })
+        }}
+        return (l, r)
+    }
+
+    func testEveryWaveformKeepsLevelAndRate() {
+        for w in ModWaveform.allCases {
+            let o = run(w) { i in Float(sin(2 * .pi * 330 * Double(i) / self.sr)) * 0.3 }
+            let tail = Array(o.l.suffix(Int(sr * 10)))
+            let pk = AudioAnalysis.envelopePeak(AudioAnalysis.envelope(tail, sampleRate: sr), envRate: 500, band: 0.5...40)
+            XCTAssertEqual(pk.freq, 16, accuracy: 0.1, "\(w)")
+            // makeup gain: average level within 1.5 dB of the unmodulated input
+            let db = AudioAnalysis.db(AudioAnalysis.rms(tail)) - AudioAnalysis.db(0.3 / 2.squareRoot())
+            XCTAssertLessThan(abs(db), 1.5, "\(w) level \(db)")
+            XCTAssertEqual(AudioAnalysis.clickCount(tail).count, 0, "\(w)")
+        }
+    }
+
+    func testAlternatingStereoPutsEarsInAntiphase() {
+        let o = run(.sine, stereo: .alternating)
+        let l = Array(o.l.suffix(Int(sr * 2))), r = Array(o.r.suffix(Int(sr * 2)))
+        // gains move in opposite directions: their deviations from the mean are negatively correlated
+        let ml = l.reduce(0, +) / Float(l.count), mr = r.reduce(0, +) / Float(r.count)
+        var c: Float = 0
+        for i in l.indices { c += (l[i] - ml) * (r[i] - mr) }
+        XCTAssertLessThan(c, 0)
+    }
+
+    func testUpperBandLeavesBassSteadier() {
+        // 60 Hz tone: modulated much less with band = .upper
+        let tone: (Int) -> Float = { i in Float(sin(2 * .pi * 60 * Double(i) / self.sr)) * 0.4 }
+        func depth(_ x: [Float]) -> Double {
+            // RMS over exactly one 60 Hz cycle, so only the modulation shows
+            let tail = Array(x.suffix(Int(sr * 5))), w = Int(sr / 60)
+            let env = stride(from: 0, to: tail.count - w, by: w / 4).map { AudioAnalysis.rms(tail[$0..<($0 + w)]) }
+            return ((env.max() ?? 0) - (env.min() ?? 0)) / (env.max() ?? 1)
+        }
+        let full = depth(run(.sine, band: .full, signal: tone).l)
+        let upper = depth(run(.sine, band: .upper, signal: tone).l)
+        XCTAssertLessThan(upper, full * 0.6, "full \(full) upper \(upper)")
+    }
+
+    func testStrengthPresetsScaleDepth() {
+        var p = EngineParams()
+        p.strength = .gentle; let g = p.effectiveDepth
+        p.strength = .standard; let s = p.effectiveDepth
+        p.strength = .strong; let st = p.effectiveDepth
+        XCTAssertLessThan(g, s); XCTAssertLessThan(s, st)
+        XCTAssertLessThanOrEqual(st, 0.9)
+    }
 }

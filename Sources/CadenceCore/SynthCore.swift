@@ -12,6 +12,17 @@ public struct EngineParams: Equatable, Sendable {
     /// Overall strength of the effect (0...1). Effective depth = depth × intensity × mode scale.
     public var intensity: Double = 0.8
     public var waveform: ModWaveform = .sine
+    /// Gentle / standard / strong: multiplies depth.
+    public var strength: ModStrength = .standard
+    /// Modulation together in both ears, or alternating between them.
+    public var stereo: ModStereo = .together
+    /// Modulate the whole mix, or mostly above the bass.
+    public var band: ModBand = .full
+    /// Headphone externalisation (crossfeed + early reflections): sound in front, not inside the head.
+    public var spatial = false
+    /// Habituation guard: the modulation depth wanders slowly (±12 % over minutes) so it never becomes a
+    /// perfectly constant, fully ignorable signal.
+    public var slowVariation = false
     public var rampInSeconds: Double = 30
     public var noiseEnabled = false
     public var noiseLevel: Double = 0.5
@@ -28,7 +39,7 @@ public struct EngineParams: Equatable, Sendable {
 
     public var effectiveDepth: Double {
         guard amEnabled else { return 0 }
-        return min(0.9, max(0, depth * intensity * mode.depthScale))
+        return min(0.9, max(0, depth * intensity * strength.depthFactor * mode.depthScale))
     }
 }
 
@@ -86,6 +97,7 @@ public final class SynthCore {
     private let resonance: SympatheticResonance
     private let reverb: FDNReverb
     private let am: ModulationStage
+    private let spatial: Externalizer
     private let limiter: Limiter
     private let composer: Composer
     private var noiseL = PinkNoise(seed: 0x1234567), noiseR = PinkNoise(seed: 0x7654321)
@@ -121,6 +133,7 @@ public final class SynthCore {
     private var lastArc = ArcState(phase: .sustaining, energy: 1, depthScale: 1, rate: 16, density: 1, tempoBlend: 1, novelty: 1, swell: 0)
     private var swellGain: Float = 1
     private var usedRate = 0.0
+    private var variationS = 1.0
     private var locked = false
     /// Phase error (radians) measured at recent bar starts — for tests of the pulse lock.
     public private(set) var debugLockErrors: [Double] = Array(repeating: .nan, count: 64)
@@ -140,6 +153,7 @@ public final class SynthCore {
         resonance = SympatheticResonance(sampleRate: sampleRate)
         reverb = FDNReverb(sampleRate: sampleRate, t60: mode.profile.reverbTime)
         am = ModulationStage(sampleRate: sampleRate, initialRate: mode.defaultRate)
+        spatial = Externalizer(sampleRate: sampleRate)
         limiter = Limiter(sampleRate: sampleRate)
         composer = Composer(mode: mode, style: style, seed: seed)
         jitter = SeededRNG(seed: seed ^ 0x5EED)
@@ -303,6 +317,8 @@ public final class SynthCore {
         wetS += (prof.reverbWet - wetS) * 0.02
         reverb.process(left: dryL, right: dryR, frames: n, wet: wetS)
 
+        spatial.process(left: dryL, right: dryR, frames: n, amount: p.spatial ? 1 : 0)
+
         let startElapsed = amElapsed
         let invRamp = 1 / max(0.001, p.rampInSeconds)
         let sr = sampleRate
@@ -317,8 +333,12 @@ public final class SynthCore {
             if abs(snapped - rate) / rate <= 0.1 { rate = snapped; locked = true }
         }
         usedRate = rate
-        am.process(left: dryL, right: dryR, frames: n, rate: rate, depth: p.effectiveDepth * arc.depthScale, waveform: p.waveform,
-                   immediateRate: locked) { i in
+        // habituation guard: two slow, incommensurate sines (periods ≈ 2.9 and 4.5 minutes)
+        let wander = p.slowVariation
+            ? 1 + 0.07 * sin(2 * .pi * amElapsed / 173) + 0.05 * sin(2 * .pi * amElapsed / 271 + 1.3) : 1
+        variationS += (wander - variationS) * 0.01
+        am.process(left: dryL, right: dryR, frames: n, rate: rate, depth: min(0.9, p.effectiveDepth * arc.depthScale * variationS),
+                   waveform: p.waveform, stereo: p.stereo, band: p.band, immediateRate: locked) { i in
             let x = min(1, (startElapsed + Double(i) / sr) * invRamp)
             return x * x * (3 - 2 * x)
         }

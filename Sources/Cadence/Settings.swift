@@ -24,6 +24,11 @@ struct UserSettings: Codable, Equatable {
     var inductionMinutes = 10.0
     var tempoLock = true
     var breathSwell = true
+    var strength: ModStrength = .standard
+    var stereo: ModStereo = .together
+    var band: ModBand = .full
+    var spatial = false
+    var slowVariation = true
 
     var style: CompositionStyle? {
         get { CompositionStyle(rawValue: styleRaw) }
@@ -51,6 +56,11 @@ struct UserSettings: Codable, Equatable {
         p.inductionMinutes = inductionMinutes
         p.tempoLock = tempoLock
         p.breathSwell = breathSwell
+        p.strength = strength
+        p.stereo = stereo
+        p.band = band
+        p.spatial = spatial
+        p.slowVariation = slowVariation
         return p
     }
 
@@ -77,6 +87,11 @@ struct UserSettings: Codable, Equatable {
         inductionMinutes = v(.inductionMinutes, d.inductionMinutes)
         tempoLock = v(.tempoLock, d.tempoLock)
         breathSwell = v(.breathSwell, d.breathSwell)
+        strength = v(.strength, d.strength)
+        stereo = v(.stereo, d.stereo)
+        band = v(.band, d.band)
+        spatial = v(.spatial, d.spatial)
+        slowVariation = v(.slowVariation, d.slowVariation)
     }
 
     private static let key = "cadence.settings.v1"   // same key: v1 data migrates in place

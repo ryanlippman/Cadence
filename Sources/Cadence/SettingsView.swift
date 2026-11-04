@@ -11,7 +11,7 @@ struct SettingsView: View {
             sessionTab.tabItem { Label("Session", systemImage: "timer") }
             AboutContent().padding(20).tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 540)
+        .frame(width: 500, height: 600)
         .tint(player.settings.mode.tint)
     }
 
@@ -31,14 +31,30 @@ struct SettingsView: View {
                 Button("Restore default rates") { player.settings.rates = [:] }
             }
             .disabled(!player.settings.amEnabled)
+            Section {
+                Picker("Strength", selection: $player.settings.strength) {
+                    ForEach(ModStrength.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text("If the effect feels too subtle, try Strong. In published research, stronger modulation helped most for listeners who report more attention difficulties; others may find it distracting. Choose what feels best.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Strength") }
+            .disabled(!player.settings.amEnabled)
             Section("Shape") {
                 LabeledSlider(title: "Depth", systemImage: "arrow.up.and.down", value: $player.settings.depth, range: 0.1...0.7)
                 LabeledSlider(title: "Ramp-in", systemImage: "chart.line.uptrend.xyaxis", value: $player.settings.rampInSeconds,
                               range: 0...120, display: { "\(Int($0)) s" })
                 Picker("Waveform", selection: $player.settings.waveform) {
-                    Text("Smooth (sine)").tag(ModWaveform.sine)
-                    Text("Rounded").tag(ModWaveform.rounded)
+                    ForEach(ModWaveform.allCases) { w in Text("\(w.title) — \(w.blurb)").tag(w) }
                 }
+                Picker("Stereo", selection: $player.settings.stereo) {
+                    ForEach(ModStereo.allCases) { Text($0.title).tag($0) }
+                }
+                Picker("Applies to", selection: $player.settings.band) {
+                    ForEach(ModBand.allCases) { Text($0.title).tag($0) }
+                }
+                Text("Alternating moves the pulse gently between your ears (best on headphones). “Above the bass” keeps the low notes steady, which some people find less tiring.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!player.settings.amEnabled)
         }
@@ -61,9 +77,15 @@ struct SettingsView: View {
                 Toggle("Slow, breathing-paced swells while settling in", isOn: $player.settings.breathSwell)
                 Text("A very gentle rise and fall about six times a minute, like slow breathing, that fades away as the session deepens.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Keep the modulation subtly alive", isOn: $player.settings.slowVariation)
+                Text("The strength wanders very slowly (about ±12 % over several minutes) so it never becomes a perfectly constant signal your ear tunes out completely.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Place the sound in front of you (headphones)", isOn: $player.settings.spatial)
+                Text("Crossfeed and soft early reflections move the piano out of your head and into the room ahead, as if from speakers on your desk.")
+                    .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Techniques") }
             Section {
-                Text("Once settled, Cadence also reduces surprises: fewer changes of key and style, steadier texture. These choices are inspired by research on rhythm, arousal and attention; how they feel varies from person to person.")
+                Text("Cadence also reduces surprises throughout: no sudden accents, gaps, jumps in texture or shrill high notes, and once settled, fewer changes of key and style. These choices are inspired by research on rhythm, arousal and attention; how they feel varies from person to person.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

@@ -23,6 +23,9 @@ final class PlayerController: ObservableObject {
     @Published private(set) var sessionProgress: Double = 0
     @Published private(set) var status = EngineStatus()
     @Published private(set) var errorMessage: String?
+    /// The piece (movement) now playing: unique name and generated cover.
+    @Published private(set) var piece: PieceIdentity?
+    private let pieceSalt = UInt64.random(in: 0...UInt64.max)
 
     var isPlaying: Bool { state == .playing || state == .stopping }
     var isLoading: Bool { state == .loading }
@@ -153,7 +156,14 @@ final class PlayerController: ObservableObject {
         let m = core.meters
         maxPeakSeen = max(maxPeakSeen, m.peak)
         let st = core.currentStatus
-        if st != status { status = st }
+        if st != status {
+            status = st
+            if !st.keyName.isEmpty, piece?.movement != st.movement || piece == nil {
+                piece = PieceNames.claim(PieceIdentity(movement: st.movement, keyName: st.keyName, style: st.style,
+                                                       mode: settings.mode, salt: pieceSalt))
+                updateNowPlaying()
+            }
+        }
         if m.arcPhase != arcPhase { arcPhase = m.arcPhase }
         if let end = sessionEnd {
             let left = end.timeIntervalSinceNow
@@ -195,13 +205,18 @@ final class PlayerController: ObservableObject {
     private func updateNowPlaying() {
         let center = MPNowPlayingInfoCenter.default()
         if state == .playing {
-            center.nowPlayingInfo = [
-                MPMediaItemPropertyTitle: "\(settings.mode.title) · \(settings.style?.title ?? "Varied")",
-                MPMediaItemPropertyArtist: "Cadence",
-                MPMediaItemPropertyAlbumTitle: "Generated piano",
+            var info: [String: Any] = [
+                MPMediaItemPropertyTitle: piece?.name ?? "\(settings.mode.title) · \(settings.style?.title ?? "Varied")",
+                MPMediaItemPropertyArtist: piece.map { "Cadence · \($0.subtitle)" } ?? "Cadence",
+                MPMediaItemPropertyAlbumTitle: "\(settings.mode.title) · generated piano",
                 MPNowPlayingInfoPropertyIsLiveStream: true,
                 MPNowPlayingInfoPropertyPlaybackRate: 1.0,
             ]
+            if let piece {
+                let img = Artwork.image(for: piece)
+                info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+            }
+            center.nowPlayingInfo = info
             center.playbackState = .playing
         } else {
             center.playbackState = state == .idle ? .stopped : .paused

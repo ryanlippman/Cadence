@@ -19,6 +19,29 @@ final class EngineTests: XCTestCase {
         }}
     }
 
+    func testAllNewOptionsTogetherAreCleanAndTogglingNeverClicks() {
+        let core = SynthCore(bank: EngineTests.bank, seed: 6, style: .romantic, mode: .focus)
+        var p = EngineParams(); p.volume = 1; p.intensity = 1; p.rampInSeconds = 0.01
+        p.strength = .strong; p.waveform = .ramp; p.stereo = .alternating; p.band = .upper
+        p.spatial = true; p.slowVariation = true
+        core.setParams(p); core.startSession(fadeInSeconds: 0.5)
+        var o = core.renderOffline(seconds: 20)
+        // toggle everything mid-stream
+        p.spatial = false; p.stereo = .together; p.band = .full; p.waveform = .pulse; p.strength = .gentle
+        core.setParams(p)
+        let o2 = core.renderOffline(seconds: 10)
+        o.left += o2.left; o.right += o2.right
+        for x in [o.left, o.right] {
+            XCTAssertFalse(AudioAnalysis.hasNonFinite(x))
+            XCTAssertLessThanOrEqual(AudioAnalysis.peak(x), 0.996)
+            XCTAssertEqual(AudioAnalysis.clickCount(Array(x[Int(sr)...])).count, 0)
+        }
+        // Strong at 16 Hz is clearly present in the envelope
+        let env = AudioAnalysis.envelope(Array(o.left[Int(sr * 5)..<Int(sr * 20)]), sampleRate: sr)
+        let pk = AudioAnalysis.envelopePeak(env, envRate: 500, band: 10...22)
+        XCTAssertEqual(pk.freq, 16, accuracy: 1.2)
+    }
+
     func testModeSwitchKeepsMusicPlaying() {
         let core = SynthCore(bank: EngineTests.bank, seed: 4, style: .romantic)
         var p = EngineParams(); p.rampInSeconds = 0.01

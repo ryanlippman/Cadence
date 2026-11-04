@@ -6,8 +6,87 @@ import CadenceCore
 // cadence-analyze renders <dir> [seconds]       write listening renders for every style/mode
 let args = CommandLine.arguments
 let cmd = args.count > 1 ? args[1] : "report"
+func mod12(_ x: Int) -> Int { ((x % 12) + 12) % 12 }
 func f1(_ x: Double) -> String { String(format: "%.1f", x) }
 func f2(_ x: Double) -> String { String(format: "%.2f", x) }
+
+
+func composeMinutes(_ style: CompositionStyle, seed: UInt64, minutes: Double = 60, mode: FocusMode = .focus) -> [Bar] {
+    let c = Composer(mode: mode, style: style, seed: seed)
+    var bars: [Bar] = []
+    var mins = 0.0
+    while mins < minutes { let b = c.nextBar(); bars.append(b); mins += Double(b.beats) / b.tempo }
+    return bars
+}
+let salienceHeader = "| Style | Leaps>6th | Static runs | Outer ∥5/8 | Unresolved | Velocity jumps >8 (max) | Density jumps | Silent gaps | Melody > C6 | Accomp. over melody |\n|---|---|---|---|---|---|---|---|---|---|\n"
+func salienceRow(_ style: CompositionStyle, _ r: CompositionReport) -> String {
+    "| \(style.title) | \(r.melodicLeapsOverSixth) | \(r.staticRepeats) | \(r.outerParallels)/\(r.chordChanges) | \(r.unresolvedDissonances) | \(r.velocityJumps) (\(r.maxVelocityJump)) | \(r.densityJumps) | \(r.silentGaps) | \(r.registerPeaks) | \(r.maskedMelody) |"
+}
+
+if cmd == "comp" {
+    // quick composition-quality check across seeds: cadence-analyze comp [seeds]
+    let seeds = args.count > 2 ? Int(args[2]) ?? 3 : 3
+    print(salienceHeader, terminator: "")
+    for style in CompositionStyle.allCases {
+        var bars: [Bar] = []
+        for sd in 0..<seeds { bars += composeMinutes(style, seed: UInt64(5 + sd * 17)) }
+        let r = CompositionAnalysis.analyze(bars)
+        print(salienceRow(style, r) + " oot=\(r.outOfKey) keys=\(r.keyChanges) chords=\(r.distinctChordSymbols) uniq=\(f2(r.uniqueFourBarWindows)) mean=\(f2(r.meanAbsMelodicInterval)) npb=\([VoiceRole.melody, .counter, .bass, .inner].map { f1(r.notesPerBar[$0] ?? 0) }.joined(separator: "/"))")
+    }
+    exit(0)
+}
+
+if cmd == "salience" {
+    // cadence-analyze salience <style>: show contexts of static runs, leaps, density jumps
+    let style = CompositionStyle(rawValue: args.count > 2 ? args[2] : "romantic")!
+    let bars = composeMinutes(style, seed: 5)
+    var mel: [(Bar, GeneratedNote)] = []
+    for b in bars { for n in b.notes where n.voice == .melody { mel.append((b, n)) } }
+    var shown = 0
+    for i in 2..<mel.count where shown < 12 {
+        let a = mel[i - 2].1.midi, b = mel[i - 1].1.midi, c = mel[i].1.midi
+        let leap = abs(c - b) > 9
+        if (a == b && b == c) || leap {
+            shown += 1
+            let ctx = mel[max(0, i - 4)...min(mel.count - 1, i + 1)].map { "\($0.1.midi)\($0.1.kind.rawValue.prefix(3))\($0.1.durBeats)@\($0.0.index):\($0.1.beat)" }.joined(separator: " ")
+            print("\(leap ? "LEAP" : "STATIC") \(mel[i].0.section) \(mel[i].0.chords.map { $0.chord.symbol }) | \(ctx)")
+        }
+    }
+    // outer-voice parallels at chord changes (same rule as CompositionAnalysis)
+    var prevPair: (Int, Int, Bar, Double)? = nil
+    var par = 0, joins = 0
+    for b in bars {
+        for c in b.chords {
+            guard let bass = b.notes.filter({ $0.voice == .bass && abs($0.beat - c.beat) < 0.15 }).map({ $0.midi }).min(),
+                  let m = b.notes.last(where: { $0.voice == .melody && $0.beat <= c.beat + 0.3 })?.midi ?? mel.last(where: { $0.0.index < b.index })?.1.midi
+            else { prevPair = nil; continue }
+            if let (pm, pb, pbar, _) = prevPair, pm != m, pb != bass {
+                let x = mod12(pm - pb), y = mod12(m - bass)
+                if x == y && (x == 0 || x == 7) && (m - pm).signum() == (bass - pb).signum() {
+                    par += 1
+                    let join = pbar.phraseEnd && pbar.index != b.index
+                    if join { joins += 1 }
+                    if par <= 6 { print("PAR \(x == 0 ? "8ve" : "5th") \(join ? "JOIN" : "in-phrase") \(b.section) bar \(b.index) mel \(pm)→\(m) bass \(pb)→\(bass) \(c.chord.symbol)") }
+                }
+            }
+            prevPair = (m, bass, b, c.beat)
+        }
+    }
+    print("parallels \(par), at phrase joins \(joins)")
+    var last: Bar? = nil
+    shown = 0
+    for b in bars {
+        if let l = last {
+            let c0 = l.notes.count * 4 / l.beats, c1 = b.notes.count * 4 / b.beats
+            if max(c0, c1) > 2 * min(c0, c1) && abs(c0 - c1) > 6 && shown < 8 {
+                shown += 1
+                print("DENSITY bar \(b.index) \(l.section)→\(b.section) \(c0)→\(c1) voices \(Dictionary(grouping: l.notes, by: { $0.voice }).mapValues { $0.count }) → \(Dictionary(grouping: b.notes, by: { $0.voice }).mapValues { $0.count })")
+            }
+        }
+        last = b
+    }
+    exit(0)
+}
 
 if cmd == "score" {
     let style = CompositionStyle(rawValue: args.count > 2 ? args[2] : "romantic")
@@ -149,6 +228,12 @@ for style in CompositionStyle.allCases {
     let npb = [VoiceRole.melody, .counter, .bass, .inner].map { f1(r.notesPerBar[$0] ?? 0) }.joined(separator: "/")
     let row = "| \(style.title) | \(r.bars) | \(Int(r.minutes)) | \(npb) | \(r.outOfKey) | \(f1(100 * Double(r.chromatic) / Double(r.notes))) | \(f1(100 * Double(r.melodyNonChordTones) / Double(max(1, r.melodyNotes)))) | \(r.unresolvedDissonances) | \(r.outerParallels)/\(r.chordChanges) | \(f2(r.meanAbsMelodicInterval)) | \(r.melodicLeapsOverSixth) | \(r.staticRepeats) | \(r.keyChanges) | \(r.distinctChordSymbols) | \(f2(r.uniqueFourBarWindows)) | \(Int(r.tempoRange.lowerBound))–\(Int(r.tempoRange.upperBound)) | \(r.velocityRange.lowerBound)–\(r.velocityRange.upperBound) |"
     print(row); md += row + "\n"
+}
+md += "\n### Salience (events likely to grab attention; 3 × 60 min per style)\n\n" + salienceHeader
+for style in CompositionStyle.allCases {
+    var bars: [Bar] = []
+    for sd in 0..<3 { bars += composeMinutes(style, seed: UInt64(5 + sd * 17)) }
+    md += salienceRow(style, CompositionAnalysis.analyze(bars)) + "\n"
 }
 if let i = args.firstIndex(of: "--long"), i + 1 < args.count, let mins = Double(args[i + 1]) {
     var p = EngineParams(); p.style = nil

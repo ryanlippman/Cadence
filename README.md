@@ -67,8 +67,19 @@ Hierarchical, rules-based — no machine learning, no recordings:
   | Relax | 9 Hz         | 6–12 Hz   |
   | Sleep | 2.5 Hz       | 1–4 Hz    |
 
-  Effective depth = Depth (45 %) × Intensity (80 %) × mode scale. 30 s ramp-in. AM, not binaural beats, so it
-  works on speakers.
+  Effective depth = Depth (45 %) × Intensity (80 %) × Strength × mode scale (capped at 90 %). 30 s ramp-in.
+  AM, not binaural beats, so it works on speakers.
+- **Strength preset** (main window): Gentle ×0.65 / Standard ×1 / Strong ×1.6. Woods et al. (2024) reported
+  that stronger modulation helped most for listeners with more attention difficulties; arousal-preference
+  research (Geen 1984; Furnham & Bradley 1997) suggests people differ in how much stimulation they prefer.
+- **Waveforms** (cross-faded when changed, all corner-free so they never click or buzz): Smooth (sine),
+  Rounded, Pulse (brief dips, steady between), Onset (quick rise, slow fall). Average level is held constant.
+- **Stereo:** Together, or Alternating (ears half a cycle apart, so the pulse moves gently side to side).
+- **Band:** Whole mix, or Above the bass (≈220 Hz split; the low end gets only a quarter of the modulation).
+- **Slow variation** (habituation guard, default on): depth wanders ±12 % over minutes (two incommensurate
+  slow sines) so the signal never becomes perfectly constant.
+- **Spatial / externalisation** (headphones, off by default): crossfeed (0.28 ms, low-passed) plus sparse early
+  reflections place the piano in front rather than inside the head.
 - Optional pink-noise bed (high- and low-passed), look-ahead limiter (inactive at normal levels), squared
   volume and fade curves.
 
@@ -86,12 +97,22 @@ Sessions no longer start at full strength:
   moves with the music. (Sleep's slow rates usually don't fall near a beat multiple and run free.)
 - **Breathing-paced swells** (default on): a ±1.5 dB swell at 0.1 Hz (≈6 per minute) while settling, fading
   out as the session deepens.
+- **Salience reduction (always on):** the composer smooths everything that tends to grab attention: melody
+  velocities change by at most 6 per note, texture density meets the previous bar halfway at phrase starts
+  (no sudden bursts or drop-outs), no three repeated melody notes in a row, wide leaps re-placed an octave
+  closer, cadence notes chosen within a fifth, melody capped at C6, and phrase joins checked for parallel
+  fifths/octaves. Measured in `docs/ANALYSIS.md` (Salience table).
 - **Fewer surprises once settled:** key excursions and style changes become ~45 % less likely, so attention
   isn't pulled by large musical events.
 
 These are design choices inspired by research on rhythm, arousal and attention; they do not induce a
 particular mental state, and how they feel varies between people. Try the arc offline:
 `swift run -c release cadence-render --ease-in 3 --pulse-lock --seconds 240 demo.wav`.
+
+### Pieces, names and cover art
+Each movement is a "piece" with a unique generated name (e.g. *Lanterns on Still Water*), a form-and-key
+subtitle (*Nocturne in E♭ major*) and procedurally drawn cover art (style sets the motif, mode the colour
+family, key the hue). They appear in the window, the menu bar and macOS Now Playing; names are never reused.
 
 ### Engine & reliability
 - Fixed 48 kHz internal rate; the mixer converts to the device rate. Output changes restart the engine
@@ -104,7 +125,7 @@ particular mental state, and how they feel varies between people. Try the arc of
 
 ```bash
 swift build
-swift test -c release                     # 45 tests, ~1.5 minutes
+swift test -c release                     # 50 tests, ~1.5 minutes
 Scripts/build_app.sh                      # -> build/Cadence.app
 open build/Cadence.app
 ```
