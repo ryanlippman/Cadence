@@ -2,21 +2,30 @@ import Foundation
 import AVFoundation
 import MediaPlayer
 import IOKit.pwr_mgt
-import Combine
 import CadenceCore
 
 @MainActor
 final class PlayerController: ObservableObject {
     static let shared = PlayerController()
 
-    @Published var settings: UserSettings { didSet { settings.save(); pushParams(); if settings.timerMinutes != oldValue.timerMinutes { restartTimer() } } }
-    @Published private(set) var isPlaying = false
-    @Published private(set) var isLoading = true
+    @Published var settings: UserSettings {
+        didSet {
+            guard settings != oldValue else { return }
+            settings.save()
+            host?.core.setParams(settings.engineParams)
+            if settings.timerMinutes != oldValue.timerMinutes { restartTimer() }
+            if settings.mode != oldValue.mode || settings.styleRaw != oldValue.styleRaw { updateNowPlaying() }
+        }
+    }
+    enum State { case loading, idle, playing, stopping }
+    @Published private(set) var state: State = .loading
     @Published private(set) var remaining: TimeInterval?
-    @Published private(set) var nowPlayingText = ""
+    @Published private(set) var sessionProgress: Double = 0
+    @Published private(set) var status = EngineStatus()
     @Published private(set) var errorMessage: String?
-    /// Peak of the last rendered block (for self-test and a subtle meter).
-    @Published private(set) var level: Float = 0
+
+    var isPlaying: Bool { state == .playing || state == .stopping }
+    var isLoading: Bool { state == .loading }
 
     private var host: AudioHost?
     private var bank: SampleBank?
@@ -24,56 +33,56 @@ final class PlayerController: ObservableObject {
     private var sessionStart = Date()
     private var sessionEnd: Date?
     private var fadingOut = false
-    private var userStopping = false
     private var assertionID: IOPMAssertionID = 0
-    private var maxPeakSeen: Float = 0
-    private var configObserver: NSObjectProtocol?
+    private(set) var maxPeakSeen: Float = 0
 
     private init() {
         settings = UserSettings.load()
         Task.detached(priority: .userInitiated) {
             do {
                 let b = try SampleBank.loadBundled()
-                await MainActor.run { self.bank = b; self.isLoading = false; self.setupRemoteCommands() }
+                await MainActor.run {
+                    self.bank = b
+                    self.state = .idle
+                    self.setupRemoteCommands()
+                }
             } catch {
-                await MainActor.run { self.errorMessage = "\(error)"; self.isLoading = false }
+                await MainActor.run { self.errorMessage = "Could not load the piano: \(error)"; self.state = .idle }
             }
         }
     }
 
-    var peakSeen: Float { maxPeakSeen }
+    /// Cheap, lock-protected read for the visualiser (called every frame while visible).
+    func meters() -> EngineMeters? { host?.core.meters }
 
     // MARK: transport
 
     func toggle() {
-        if !isPlaying { start() }
-        else if userStopping { finishStop() }
-        else { stop() }
+        switch state {
+        case .idle: start()
+        case .playing: stop()
+        case .stopping: finishStop()
+        case .loading: break
+        }
     }
 
     func start() {
-        guard !isPlaying, let bank else { return }
+        guard state == .idle, let bank else { return }
         errorMessage = nil
-        do {
-            if host == nil {
-                host = AudioHost(bank: bank)
-                configObserver = NotificationCenter.default.addObserver(
-                    forName: .AVAudioEngineConfigurationChange, object: host?.engine, queue: .main) { [weak self] _ in
-                    Task { @MainActor in self?.handleConfigChange() }
-                }
-            }
-            guard let host else { return }
-            host.core.setParams(settings.engineParams)
-            host.core.resetPlayback()
-            host.core.startSession(fadeInSeconds: 2.5)
-            host.core.topUp()
-            try host.start()
-        } catch {
-            errorMessage = "Audio engine failed to start: \(error.localizedDescription)"
+        if host == nil {
+            let h = AudioHost(bank: bank, params: settings.engineParams)
+            h.onError = { [weak self] msg in Task { @MainActor in self?.errorMessage = msg } }
+            host = h
+        }
+        guard let host else { return }
+        host.core.setParams(settings.engineParams)
+        host.core.resetPlayback()
+        host.core.startSession(fadeInSeconds: 3)
+        do { try host.start() } catch {
+            errorMessage = "Audio output failed to start: \(error.localizedDescription)"
             return
         }
-        isPlaying = true
-        userStopping = false
+        state = .playing
         fadingOut = false
         sessionStart = Date()
         restartTimer()
@@ -85,77 +94,63 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    /// Gentle user stop: short fade, then pause.
+    /// Gentle stop: 1.5 s fade, then the engine pauses. The composition resumes where it left off.
     func stop() {
-        guard isPlaying, let core = host?.core else { return }
-        userStopping = true
+        guard state == .playing, let core = host?.core else { return }
+        state = .stopping
         core.beginFadeOut(seconds: 1.5)
         updateNowPlaying()
     }
 
     private func finishStop() {
         poll?.invalidate(); poll = nil
-        host?.core.resetPlayback()
         host?.pause()
-        isPlaying = false
-        userStopping = false
+        state = .idle
         fadingOut = false
         remaining = nil
         sessionEnd = nil
-        level = 0
+        sessionProgress = 0
         preventSleep(false)
         updateNowPlaying()
     }
 
-    private func handleConfigChange() {
-        guard let host, isPlaying else { return }
-        host.rebuild(params: settings.engineParams)
-        host.core.startSession(fadeInSeconds: 1)
-        host.core.topUp()
-        try? host.start()
-    }
+    func selectMode(_ m: FocusMode) { settings.mode = m }
+    func selectStyle(_ s: CompositionStyle?) { settings.style = s }
 
     // MARK: session timer
 
     private func restartTimer() {
         guard isPlaying else { return }
         if settings.timerMinutes > 0 {
-            sessionEnd = Date().addingTimeInterval(Double(settings.timerMinutes) * 60)
-            // extending the timer mid-fade brings the music back
-            if fadingOut, let core = host?.core { core.startSession(fadeInSeconds: 3); fadingOut = false }
+            sessionStart = Date()
+            sessionEnd = sessionStart.addingTimeInterval(Double(settings.timerMinutes) * 60)
         } else {
-            sessionEnd = nil; remaining = nil
-            if fadingOut, let core = host?.core { core.startSession(fadeInSeconds: 3); fadingOut = false }
+            sessionEnd = nil; remaining = nil; sessionProgress = 0
+        }
+        if fadingOut || state == .stopping {      // extending a fading session brings the music back
+            host?.core.resume(fadeInSeconds: 3)
+            fadingOut = false
+            state = .playing
+            updateNowPlaying()
         }
     }
 
-    static let fadeOutSeconds = 25.0
-
     private func tick() {
         guard isPlaying, let core = host?.core else { return }
-        maxPeakSeen = max(maxPeakSeen, core.outputPeak)
-        level = core.outputPeak
-        if !core.currentKeyName.isEmpty {
-            nowPlayingText = "\(core.currentKeyName) · \(Int(core.currentTempo.rounded())) BPM"
-        }
+        let m = core.meters
+        maxPeakSeen = max(maxPeakSeen, m.peak)
+        let st = core.currentStatus
+        if st != status { status = st }
         if let end = sessionEnd {
             let left = end.timeIntervalSinceNow
             remaining = max(0, left)
-            if left <= PlayerController.fadeOutSeconds, !fadingOut, !userStopping {
+            sessionProgress = min(1, Date().timeIntervalSince(sessionStart) / end.timeIntervalSince(sessionStart))
+            if left <= settings.fadeOutSeconds, !fadingOut, state == .playing {
                 fadingOut = true
                 core.beginFadeOut(seconds: max(1, left))
             }
         }
-        if core.fadeFinished { finishStop() }
-    }
-
-    // MARK: params
-
-    private func pushParams() { host?.core.setParams(settings.engineParams) }
-
-    func selectMode(_ m: FocusMode) {
-        settings.mode = m
-        updateNowPlaying()
+        if m.fadeFinished && (state == .stopping || fadingOut) { finishStop() }
     }
 
     // MARK: system integration
@@ -179,21 +174,23 @@ final class PlayerController: ObservableObject {
         c.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.stop() }; return .success }
         c.stopCommand.addTarget { [weak self] _ in Task { @MainActor in self?.stop() }; return .success }
         c.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.toggle() }; return .success }
-        for cmd in [c.nextTrackCommand, c.previousTrackCommand, c.seekForwardCommand, c.seekBackwardCommand] { cmd.isEnabled = false }
+        for cmd in [c.nextTrackCommand, c.previousTrackCommand, c.seekForwardCommand, c.seekBackwardCommand,
+                    c.changePlaybackPositionCommand] { cmd.isEnabled = false }
     }
 
     private func updateNowPlaying() {
         let center = MPNowPlayingInfoCenter.default()
-        if isPlaying {
+        if state == .playing {
             center.nowPlayingInfo = [
-                MPMediaItemPropertyTitle: "Cadence · \(settings.mode.title)",
-                MPMediaItemPropertyArtist: "Generated piano",
+                MPMediaItemPropertyTitle: "\(settings.mode.title) · \(settings.style?.title ?? "Varied")",
+                MPMediaItemPropertyArtist: "Cadence",
+                MPMediaItemPropertyAlbumTitle: "Generated piano",
                 MPNowPlayingInfoPropertyIsLiveStream: true,
-                MPNowPlayingInfoPropertyPlaybackRate: userStopping ? 0.0 : 1.0,
+                MPNowPlayingInfoPropertyPlaybackRate: 1.0,
             ]
-            center.playbackState = userStopping ? .paused : .playing
+            center.playbackState = .playing
         } else {
-            center.playbackState = .paused
+            center.playbackState = state == .idle ? .stopped : .paused
         }
     }
 }

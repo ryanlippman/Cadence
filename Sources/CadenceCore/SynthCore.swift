@@ -32,6 +32,11 @@ public struct EngineStatus: Sendable, Equatable {
     public var section = ""
     public var chordSymbol = ""
     public var movement = 0
+    public init() {}
+    public init(keyName: String, tempo: Double, style: CompositionStyle, section: String, chordSymbol: String, movement: Int) {
+        self.keyName = keyName; self.tempo = tempo; self.style = style; self.section = section
+        self.chordSymbol = chordSymbol; self.movement = movement
+    }
 }
 
 /// Audio-thread → UI meters.
@@ -44,6 +49,11 @@ public struct EngineMeters: Sendable {
     public var fadeFinished = false
     public var activeVoices = 0
     public var limiterGain: Float = 1
+    public init() {}
+    init(peak: Float, rms: Float, amPhase: Double, amDepth: Double, fadeLevel: Double, fadeFinished: Bool, activeVoices: Int, limiterGain: Float) {
+        self.peak = peak; self.rms = rms; self.amPhase = amPhase; self.amDepth = amDepth; self.fadeLevel = fadeLevel
+        self.fadeFinished = fadeFinished; self.activeVoices = activeVoices; self.limiterGain = limiterGain
+    }
 }
 
 /// The complete signal chain, independent of audio hardware so it can be rendered offline:
