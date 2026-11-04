@@ -1,12 +1,17 @@
 import Foundation
 
 public struct NoteEvent: Sendable {
-    public enum Kind: UInt8, Sendable { case note, pedalDown, pedalUp }
+    public enum Kind: UInt8, Sendable { case note, pedalDown, pedalUp, tempo }
     public var startSample: Int64
     public var kind: Kind
     public var holdSamples: Int
     public var midi: Int
     public var velocity: Int
+    /// For `.tempo`: beat frequency in Hz (holdSamples = bar length in samples).
+    public var value: Double = 0
+    public init(tempoBeatHz: Double, barSamples: Int, at s: Int64) {
+        startSample = s; kind = .tempo; holdSamples = barSamples; midi = 0; velocity = 0; value = tempoBeatHz
+    }
     public init(startSample: Int64, holdSamples: Int, midi: Int, velocity: Int) {
         self.startSample = startSample; self.kind = .note; self.holdSamples = holdSamples
         self.midi = midi; self.velocity = velocity

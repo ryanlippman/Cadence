@@ -16,6 +16,14 @@ public struct EngineParams: Equatable, Sendable {
     public var noiseEnabled = false
     public var noiseLevel: Double = 0.5
     public var volume: Double = 0.7
+    /// Ease-in length in minutes (0 = start at full strength). See `SessionArc`.
+    public var inductionMinutes: Double = 0
+    /// Length of a timed session in seconds measured from `startSession` (0 = open-ended); used to ease out.
+    public var sessionSeconds: Double = 0
+    /// Snap the modulation rate to a whole multiple of the music's beat and keep it phase-aligned to bars.
+    public var tempoLock = false
+    /// Slow (0.1 Hz) breathing-paced swell while settling in.
+    public var breathSwell = false
     public init() {}
 
     public var effectiveDepth: Double {
@@ -49,6 +57,13 @@ public struct EngineMeters: Sendable {
     public var fadeFinished = false
     public var activeVoices = 0
     public var limiterGain: Float = 1
+    public var arcPhase: ArcPhase = .sustaining
+    public var arcEnergy: Double = 1
+    /// Modulation rate actually in use (after the arc and pulse-locking).
+    public var modRate: Double = 0
+    public var pulseLocked = false
+    /// Beat frequency (Hz) of the bar currently playing.
+    public var beatHz: Double = 0
     public init() {}
     init(peak: Float, rms: Float, amPhase: Double, amDepth: Double, fadeLevel: Double, fadeFinished: Bool, activeVoices: Int, limiterGain: Float) {
         self.peak = peak; self.rms = rms; self.amPhase = amPhase; self.amDepth = amDepth; self.fadeLevel = fadeLevel
@@ -84,6 +99,8 @@ public final class SynthCore {
     private var publishedPosition: Int64 = 0
     private var publishedMeters = EngineMeters()
 
+    private var sessionStartPosition: Int64 = 0
+
     // --- composer side, guarded by `composerLock` (never touched by the audio thread) ---
     private let composerLock = NSLock()
     private var nextBarStart: Int64 = 0
@@ -100,6 +117,14 @@ public final class SynthCore {
     private var volumeS = 0.7
     private var noiseGain = 0.0
     private var wetS: Float = 0.2
+    private var lockBeatHz = 0.0
+    private var lastArc = ArcState(phase: .sustaining, energy: 1, depthScale: 1, rate: 16, density: 1, tempoBlend: 1, novelty: 1, swell: 0)
+    private var swellGain: Float = 1
+    private var usedRate = 0.0
+    private var locked = false
+    /// Phase error (radians) measured at recent bar starts — for tests of the pulse lock.
+    public private(set) var debugLockErrors: [Double] = Array(repeating: .nan, count: 64)
+    private var lockErrorIdx = 0
     private let dryL: UnsafeMutablePointer<Float>
     private let dryR: UnsafeMutablePointer<Float>
     private let due: UnsafeMutablePointer<NoteEvent>
@@ -150,6 +175,7 @@ public final class SynthCore {
             control.fadeTarget = 1
             control.fadeSeconds = max(0.01, fadeInSeconds)
             control.session += 1
+            sessionStartPosition = publishedPosition
         }
     }
 
@@ -177,12 +203,15 @@ public final class SynthCore {
 
     /// Compose and schedule upcoming bars. Cheap; call from a timer a few times per second.
     public func topUp(aheadSeconds: Double = 4) {
-        let pos = withQueue { publishedPosition }
+        let (pos, sessionStart, p) = withQueue { (publishedPosition, sessionStartPosition, params) }
         composerLock.lock()
         let horizon = pos + Int64(aheadSeconds * sampleRate)
         if nextBarStart < pos { nextBarStart = pos + Int64(0.05 * sampleRate) }
         var fresh: [NoteEvent] = []
         while nextBarStart < horizon {
+            let t = Double(nextBarStart - sessionStart) / sampleRate
+            composer.setArc(SessionArc.state(elapsed: max(0, t), inductionMinutes: p.inductionMinutes,
+                                             sessionSeconds: p.sessionSeconds, mode: p.mode, targetRate: p.rateHz))
             let bar = composer.nextBar()
             let beat = 60.0 / bar.tempo * sampleRate
             let barStart = nextBarStart
@@ -193,7 +222,8 @@ public final class SynthCore {
                 if start < barStart { start = barStart }
                 fresh.append(NoteEvent(startSample: start, holdSamples: Int(n.durBeats * beat), midi: n.midi, velocity: n.velocity))
             }
-            for p in bar.pedal { fresh.append(NoteEvent(pedalDown: p.down, at: barStart + Int64(p.beat * beat))) }
+            for pe in bar.pedal { fresh.append(NoteEvent(pedalDown: pe.down, at: barStart + Int64(pe.beat * beat))) }
+            fresh.append(NoteEvent(tempoBeatHz: bar.tempo / 60, barSamples: Int(Double(bar.beats) * beat), at: barStart))
             nextBarStart += Int64(Double(bar.beats) * beat)
             status = EngineStatus(keyName: bar.keyName, tempo: bar.tempo, style: bar.style, section: bar.section,
                                   chordSymbol: bar.chords.first?.chord.symbol ?? "", movement: bar.movement)
@@ -251,6 +281,18 @@ public final class SynthCore {
             case .note: sampler.noteOn(midi: e.midi, velocity: e.velocity, holdSamples: e.holdSamples)
             case .pedalDown: sampler.setPedal(true)
             case .pedalUp: sampler.setPedal(false)
+            case .tempo:
+                lockBeatHz = e.value
+                // phase-lock: steer the LFO so it is at phase 0 at bar starts (corrected over the bar)
+                let predicted = am.currentPhase + 2 * .pi * am.currentRate * Double(off) / sampleRate
+                var err = predicted.truncatingRemainder(dividingBy: 2 * .pi)
+                if err > .pi { err -= 2 * .pi }
+                if locked {
+                    debugLockErrors[lockErrorIdx] = err
+                    lockErrorIdx = (lockErrorIdx + 1) % debugLockErrors.count
+                }
+                let barSeconds = Double(max(1, e.holdSamples)) / sampleRate
+                if audioParams.tempoLock { am.nudgePhase(by: -err, over: min(0.5, barSeconds / 4)) }
             }
         }
         if cursor < n { sampler.render(outL: dryL + cursor, outR: dryR + cursor, frames: n - cursor) }
@@ -264,12 +306,30 @@ public final class SynthCore {
         let startElapsed = amElapsed
         let invRamp = 1 / max(0.001, p.rampInSeconds)
         let sr = sampleRate
-        am.process(left: dryL, right: dryR, frames: n, rate: p.rateHz, depth: p.effectiveDepth, waveform: p.waveform) { i in
+        let arc = SessionArc.state(elapsed: amElapsed, inductionMinutes: p.inductionMinutes,
+                                   sessionSeconds: p.sessionSeconds, mode: p.mode, targetRate: p.rateHz)
+        lastArc = arc
+        var rate = arc.rate
+        locked = false
+        if p.tempoLock && lockBeatHz > 0.2 {
+            let k = max(1, (rate / lockBeatHz).rounded())
+            let snapped = k * lockBeatHz
+            if abs(snapped - rate) / rate <= 0.1 { rate = snapped; locked = true }
+        }
+        usedRate = rate
+        am.process(left: dryL, right: dryR, frames: n, rate: rate, depth: p.effectiveDepth * arc.depthScale, waveform: p.waveform,
+                   immediateRate: locked) { i in
             let x = min(1, (startElapsed + Double(i) / sr) * invRamp)
             return x * x * (3 - 2 * x)
         }
         amElapsed += Double(n) / sr
 
+        // breathing-paced swell (±1.5 dB at 0.1 Hz) while settling, interpolated across the block
+        let swellTarget: Float = p.breathSwell && arc.swell > 0
+            ? Float(pow(10, 1.5 * arc.swell * sin(2 * .pi * 0.1 * amElapsed) / 20)) : 1
+        let swellStart = swellGain
+        let swellStep = (swellTarget - swellStart) / Float(n)
+        swellGain = swellTarget
         let fadeStep = 1 / (audioControl.fadeSeconds * sr)
         let target = audioControl.fadeTarget
         let noiseTarget = p.noiseEnabled ? p.noiseLevel * 0.12 : 0
@@ -281,7 +341,7 @@ public final class SynthCore {
             if fadeLevel < target { fadeLevel = min(target, fadeLevel + fadeStep) }
             else if fadeLevel > target { fadeLevel = max(target, fadeLevel - fadeStep) }
             // perceptual (squared) fade curve and squared volume taper
-            let g = Float(volumeS * volumeS * fadeLevel * fadeLevel) * outputTrim
+            let g = Float(volumeS * volumeS * fadeLevel * fadeLevel) * outputTrim * (swellStart + swellStep * Float(i))
             let ng = Float(noiseGain)
             outL[i] = (dryL[i] + noiseL.next() * ng) * g
             outR[i] = (dryR[i] + noiseR.next() * ng) * g
@@ -295,6 +355,11 @@ public final class SynthCore {
                                            amDepth: p.effectiveDepth * am.transitionLevel, fadeLevel: fadeLevel,
                                            fadeFinished: target == 0 && fadeLevel == 0, activeVoices: sampler.activeVoiceCount,
                                            limiterGain: limiter.minGain)
+            publishedMeters.arcPhase = lastArc.phase
+            publishedMeters.arcEnergy = lastArc.energy
+            publishedMeters.modRate = usedRate
+            publishedMeters.pulseLocked = locked
+            publishedMeters.beatHz = lockBeatHz
             publishedPosition = position
             os_unfair_lock_unlock(&queueLock)
         }

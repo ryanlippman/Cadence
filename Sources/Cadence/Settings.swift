@@ -20,6 +20,10 @@ struct UserSettings: Codable, Equatable {
     var timerMinutes = 0
     var fadeOutSeconds = 25.0
     var onboarded = false
+    /// Ease-in length in minutes (0 = start at full strength).
+    var inductionMinutes = 10.0
+    var tempoLock = true
+    var breathSwell = true
 
     var style: CompositionStyle? {
         get { CompositionStyle(rawValue: styleRaw) }
@@ -44,6 +48,9 @@ struct UserSettings: Codable, Equatable {
         p.noiseEnabled = noiseEnabled
         p.noiseLevel = noiseLevel
         p.volume = volume
+        p.inductionMinutes = inductionMinutes
+        p.tempoLock = tempoLock
+        p.breathSwell = breathSwell
         return p
     }
 
@@ -67,6 +74,9 @@ struct UserSettings: Codable, Equatable {
         timerMinutes = v(.timerMinutes, d.timerMinutes)
         fadeOutSeconds = v(.fadeOutSeconds, d.fadeOutSeconds)
         onboarded = v(.onboarded, d.onboarded)
+        inductionMinutes = v(.inductionMinutes, d.inductionMinutes)
+        tempoLock = v(.tempoLock, d.tempoLock)
+        breathSwell = v(.breathSwell, d.breathSwell)
     }
 
     private static let key = "cadence.settings.v1"   // same key: v1 data migrates in place

@@ -72,6 +72,27 @@ Hierarchical, rules-based — no machine learning, no recordings:
 - Optional pink-noise bed (high- and low-passed), look-ahead limiter (inactive at normal levels), squared
   volume and fade curves.
 
+### Session arc & flow techniques (`SessionArc.swift`, Settings → Flow)
+Sessions no longer start at full strength:
+
+- **Ease-in** (Off / 5 / 10 / 15 min, default 10): modulation depth starts at 20 % and the rate starts lower
+  (Focus 10 Hz, Relax 11 Hz, Sleep 6 Hz) and glides to the target; the music starts calmer (Focus ~60 BPM),
+  sparser and softer, and builds gradually. The app shows *Settling in → Deepening focus → Sustained focus*
+  (Relax: *Unwinding / Deep rest*; Sleep: *Drifting down / Deep calm*).
+- **Ease-out:** timed sessions wind down over their last few minutes (shallower, slower modulation, calmer
+  music) before the final fade.
+- **Pulse-locked modulation** (default on): the rate snaps to a whole multiple of the music's beat when one is
+  within 10 % of the chosen rate, and its phase is nudged to stay aligned with each bar, so the modulation
+  moves with the music. (Sleep's slow rates usually don't fall near a beat multiple and run free.)
+- **Breathing-paced swells** (default on): a ±1.5 dB swell at 0.1 Hz (≈6 per minute) while settling, fading
+  out as the session deepens.
+- **Fewer surprises once settled:** key excursions and style changes become ~45 % less likely, so attention
+  isn't pulled by large musical events.
+
+These are design choices inspired by research on rhythm, arousal and attention; they do not induce a
+particular mental state, and how they feel varies between people. Try the arc offline:
+`swift run -c release cadence-render --ease-in 3 --pulse-lock --seconds 240 demo.wav`.
+
 ### Engine & reliability
 - Fixed 48 kHz internal rate; the mixer converts to the device rate. Output changes restart the engine
   without resetting the music.
@@ -83,7 +104,7 @@ Hierarchical, rules-based — no machine learning, no recordings:
 
 ```bash
 swift build
-swift test -c release                     # 37 tests, ~1.5 minutes
+swift test -c release                     # 45 tests, ~1.5 minutes
 Scripts/build_app.sh                      # -> build/Cadence.app
 open build/Cadence.app
 ```
@@ -105,7 +126,9 @@ modulations through transitions, theme recall, style distinctness, tempo 55–80
 narrow velocity ranges, 3-hour composer runs, pedal sustain/damping/re-catch, no codec spikes, pitch
 accuracy, velocity monotonicity, envelope-spectrum peaks at 16/9/2.5 Hz in every style (absent with AM
 off), drift-free LFO phase, click-free parameter changes, mode switches without gaps, fade/resume,
-concurrent control while rendering, and a 20-minute stability run.
+concurrent control while rendering, a 20-minute stability run, and the session arc (gentle start at ≈10 Hz
+and low depth reaching 16 Hz at full depth, calmer and sparser opening music, ease-out, pulse-lock to a beat
+multiple with < 0.25 rad phase error at bar starts, breathing swell present only while settling).
 
 ## Not verified / caveats
 - **Listening.** All sound judgements here are from measurements (spectra, levels, clicks, voice-leading

@@ -6,6 +6,7 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
+            flowTab.tabItem { Label("Flow", systemImage: "chart.line.uptrend.xyaxis") }
             soundTab.tabItem { Label("Modulation", systemImage: "waveform.path") }
             sessionTab.tabItem { Label("Session", systemImage: "timer") }
             AboutContent().padding(20).tabItem { Label("About", systemImage: "info.circle") }
@@ -40,6 +41,31 @@ struct SettingsView: View {
                 }
             }
             .disabled(!player.settings.amEnabled)
+        }
+        .formStyle(.grouped)
+    }
+
+    private var flowTab: some View {
+        Form {
+            Section {
+                Picker("Ease in over", selection: $player.settings.inductionMinutes) {
+                    Text("Off").tag(0.0); Text("5 minutes").tag(5.0); Text("10 minutes").tag(10.0); Text("15 minutes").tag(15.0)
+                }
+                Text("Sessions start gently and deepen gradually: the modulation begins shallow and slower (about 10 Hz for Focus) and glides to its target, while the music starts calmer and sparser. Timed sessions also ease out over their last few minutes.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Session arc") }
+            Section {
+                Toggle("Lock the modulation to the music's pulse", isOn: $player.settings.tempoLock)
+                Text("Snaps the modulation rate to a whole multiple of the beat (within 10 % of the chosen rate) and keeps it aligned to each bar, so the effect moves with the music rather than against it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Slow, breathing-paced swells while settling in", isOn: $player.settings.breathSwell)
+                Text("A very gentle rise and fall about six times a minute, like slow breathing, that fades away as the session deepens.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Techniques") }
+            Section {
+                Text("Once settled, Cadence also reduces surprises: fewer changes of key and style, steadier texture. These choices are inspired by research on rhythm, arousal and attention; how they feel varies from person to person.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

@@ -12,7 +12,7 @@ final class PlayerController: ObservableObject {
         didSet {
             guard settings != oldValue else { return }
             settings.save()
-            host?.core.setParams(settings.engineParams)
+            host?.core.setParams(engineParams)
             if settings.timerMinutes != oldValue.timerMinutes { restartTimer() }
             if settings.mode != oldValue.mode || settings.styleRaw != oldValue.styleRaw { updateNowPlaying() }
         }
@@ -33,6 +33,16 @@ final class PlayerController: ObservableObject {
     private var sessionStart = Date()
     private var sessionEnd: Date?
     private var fadingOut = false
+    /// When the engine session (and its arc) began.
+    private var engineSessionStart = Date()
+    @Published private(set) var arcPhase: ArcPhase = .sustaining
+
+    /// Settings plus session timing, as the engine needs them.
+    private var engineParams: EngineParams {
+        var p = settings.engineParams
+        if let end = sessionEnd, isPlaying { p.sessionSeconds = end.timeIntervalSince(engineSessionStart) }
+        return p
+    }
     private var assertionID: IOPMAssertionID = 0
     private(set) var maxPeakSeen: Float = 0
 
@@ -70,13 +80,14 @@ final class PlayerController: ObservableObject {
         guard state == .idle, let bank else { return }
         errorMessage = nil
         if host == nil {
-            let h = AudioHost(bank: bank, params: settings.engineParams)
+            let h = AudioHost(bank: bank, params: engineParams)
             h.onError = { [weak self] msg in Task { @MainActor in self?.errorMessage = msg } }
             host = h
         }
         guard let host else { return }
-        host.core.setParams(settings.engineParams)
+        host.core.setParams(engineParams)
         host.core.resetPlayback()
+        engineSessionStart = Date()
         host.core.startSession(fadeInSeconds: 3)
         do { try host.start() } catch {
             errorMessage = "Audio output failed to start: \(error.localizedDescription)"
@@ -86,6 +97,7 @@ final class PlayerController: ObservableObject {
         fadingOut = false
         sessionStart = Date()
         restartTimer()
+        host.core.setParams(engineParams)
         preventSleep(true)
         updateNowPlaying()
         poll?.invalidate()
@@ -127,6 +139,7 @@ final class PlayerController: ObservableObject {
         } else {
             sessionEnd = nil; remaining = nil; sessionProgress = 0
         }
+        host?.core.setParams(engineParams)
         if fadingOut || state == .stopping {      // extending a fading session brings the music back
             host?.core.resume(fadeInSeconds: 3)
             fadingOut = false
@@ -141,6 +154,7 @@ final class PlayerController: ObservableObject {
         maxPeakSeen = max(maxPeakSeen, m.peak)
         let st = core.currentStatus
         if st != status { status = st }
+        if m.arcPhase != arcPhase { arcPhase = m.arcPhase }
         if let end = sessionEnd {
             let left = end.timeIntervalSinceNow
             remaining = max(0, left)

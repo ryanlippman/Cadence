@@ -28,6 +28,15 @@ public final class ModulationStage {
     private let dipStep: Double
     private let recoverStep: Double
     public var transitionLevel: Double { transition }
+    // pulse-lock: phase corrections are spread over many samples (a tiny, smooth frequency deviation)
+    private var nudgeLeft = 0
+    private var nudgePerSample = 0.0
+
+    /// Shift the LFO phase by `radians`, spread evenly over `seconds`.
+    public func nudgePhase(by radians: Double, over seconds: Double) {
+        nudgeLeft = max(1, Int(seconds * sampleRate))
+        nudgePerSample = radians / Double(nudgeLeft)
+    }
 
     public init(sampleRate: Double, initialRate: Double = 16) {
         self.sampleRate = sampleRate
@@ -40,6 +49,7 @@ public final class ModulationStage {
     }
 
     public var currentPhase: Double { phase }
+    public var currentRate: Double { rateS }
 
     /// Gain for a single LFO phase in radians: 1 - depth * lfo, lfo in [0, 1].
     @inline(__always)
@@ -54,7 +64,7 @@ public final class ModulationStage {
 
     /// `depth` is the target depth 0...1; `ramp(i)` supplies a 0...1 ramp-in multiplier per sample.
     public func process(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>, frames: Int,
-                        rate: Double, depth: Double, waveform: ModWaveform,
+                        rate: Double, depth: Double, waveform: ModWaveform, immediateRate: Bool = false,
                         ramp: (Int) -> Double) {
         let twoPi = 2 * Double.pi
         if abs(rate - rateTarget) / max(rateTarget, 0.1) > 0.2 {
@@ -65,6 +75,9 @@ public final class ModulationStage {
             if let p = pendingRate {
                 transition -= dipStep
                 if transition <= 0 { transition = 0; rateS = p; pendingRate = nil; recovering = true }
+            } else if immediateRate {
+                rateS = rateTarget
+                if recovering { transition += recoverStep; if transition >= 1 { transition = 1; recovering = false } }
             } else {
                 rateS += (rateTarget - rateS) * rateCoef
                 if recovering { transition += recoverStep; if transition >= 1 { transition = 1; recovering = false } }
@@ -77,6 +90,7 @@ public final class ModulationStage {
             let g = Float((1 - depthS * l) / (1 - depthS * 0.5))
             left[i] *= g; right[i] *= g
             phase += twoPi * rateS / sampleRate
+            if nudgeLeft > 0 { phase += nudgePerSample; nudgeLeft -= 1; if phase < 0 { phase += twoPi } }
             if phase >= twoPi { phase -= twoPi }
         }
     }

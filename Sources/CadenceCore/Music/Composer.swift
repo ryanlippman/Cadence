@@ -71,6 +71,8 @@ public final class Composer {
     private var queue: [Bar] = []
     private var jobs: [Job] = []
     private var styleChangePending = false
+    /// Session arc (ease-in / sustain / ease-out); nil = full strength, as without an arc.
+    private var arc: ArcState?
     private let planner: HarmonicPlanner
     private let leader = VoiceLeader()
     private let melodist: MelodyComposer
@@ -108,6 +110,11 @@ public final class Composer {
     /// Focus/relax/sleep: tempo and dynamics glide over the next bars; density changes at the next phrase.
     public func setMode(_ m: FocusMode) { mode = m }
 
+    /// Current point in the session arc: calmer, sparser music while settling in; fewer key excursions
+    /// and style changes once settled. Applied from the next bar (tempo, dynamics) or phrase (density).
+    public func setArc(_ a: ArcState?) { arc = a }
+    private var novelty: Double { arc?.novelty ?? 1 }
+
     /// nil = vary styles between movements. A change takes effect at the next phrase boundary
     /// through a short codetta and modulation, so the music never stops.
     public func setStyle(_ s: CompositionStyle?) {
@@ -144,7 +151,7 @@ public final class Composer {
     }
 
     private func planMovement() {
-        if styleChangePending || (stylePreference == nil && movement > 0 && dice.chance(0.5)) {
+        if styleChangePending || (stylePreference == nil && movement > 0 && dice.chance(0.5 * novelty)) {
             let next = stylePreference ?? dice.pick(CompositionStyle.allCases.filter { $0 != style })
             style = next
             profile = next.profile
@@ -169,7 +176,7 @@ public final class Composer {
         // contrasting key area
         var bKey = home
         // the contrasting section stays home sometimes, so key changes stay unhurried
-        if style == .baroque || dice.chance(style == .minimalist ? 0.4 : 0.65) {
+        if dice.chance((style == .baroque ? 1 : (style == .minimalist ? 0.4 : 0.65)) * novelty) {
             let rel = relatedKeys(of: home, modes: profile.modes).filter { $0.0.tonic != home.tonic }
             if !rel.isEmpty { bKey = dice.weighted(rel) }
         }
@@ -215,7 +222,7 @@ public final class Composer {
 
     // MARK: phrase rendering
 
-    private var density: Double { mode.profile.density }
+    private var density: Double { mode.profile.density * (arc?.density ?? 1) }
     private var melodyRange: ClosedRange<Int> {
         let r = profile.melodyRange
         return mode == .sleep ? r.lowerBound...(r.upperBound - 3) : r
@@ -250,7 +257,7 @@ public final class Composer {
             if recall, let stored = themes[label], stored.count > idx {
                 plan = stored[idx].plan
                 let voicings = voice(plan)
-                melody = melodist.vary(stored[idx].melody, plan: plan)
+                melody = octaveFit(melodist.vary(stored[idx].melody, plan: plan))
                 let r = melodyRange
                 melodist.fixParallels(&melody, plan: plan, voicings: voicings, range: r)
                 melodist.resolveDissonances(&melody, plan: plan, range: (r.lowerBound - 2)...(r.upperBound + 2))
@@ -281,9 +288,9 @@ public final class Composer {
             if let ante, plan.prefixKept > 0 {
                 // copy exactly as much melody as the harmony that was actually kept
                 prefixBeats = plan.slots[plan.prefixKept - 1].end
-                prefixMel = ante.melody.filter { $0.beat < prefixBeats - 1e-9 }.map {
+                prefixMel = octaveFit(ante.melody.filter { $0.beat < prefixBeats - 1e-9 }.map {
                     var n = $0; n.dur = min(n.dur, prefixBeats - n.beat); return n
-                }
+                })
             }
             let voicings = voice(plan)
             melody = melodist.compose(plan: plan, voicings: voicings, motif: isB ? motifB : motif, profile: profile,
@@ -319,6 +326,20 @@ public final class Composer {
         emit(plan: plan, voicings: voicings, melody: melody, fig: fig, section: section, role: role)
     }
 
+    /// Restated material (a consequent's opening, a recalled theme) may begin far from where the previous
+    /// phrase ended; move it by an octave when that is closer and still fits the range.
+    private func octaveFit(_ notes: [MelNote]) -> [MelNote] {
+        guard let first = notes.first, abs(first.midi - lastMelody) > 9 else { return notes }
+        let r = melodyRange
+        let lo = notes.map { $0.midi }.min()!, hi = notes.map { $0.midi }.max()!
+        for shift in [first.midi > lastMelody ? -12 : 12] {
+            if lo + shift >= r.lowerBound - 2 && hi + shift <= r.upperBound + 2 && abs(first.midi + shift - lastMelody) < abs(first.midi - lastMelody) {
+                return notes.map { var n = $0; n.midi += shift; return n }
+            }
+        }
+        return notes
+    }
+
     /// A deceptive cadence demands a short cadential extension that closes properly.
     private func emitExtension(key: Key, fig: Figuration, section: String) {
         let ext = planner.plan(key: key, profile: profile, bars: 2, beats: meter, cadence: .authentic)
@@ -345,7 +366,13 @@ public final class Composer {
         // tempo: glide toward a slowly drifting target inside the mode's range
         let tr = mode.profile.tempoRange
         tempoDrift = max(-3, min(3, tempoDrift + dice.gauss() * 1.2))
-        let target = min(max(tr.lowerBound + profile.tempoBias * (tr.upperBound - tr.lowerBound) + tempoDrift, tr.lowerBound), tr.upperBound)
+        var target = min(max(tr.lowerBound + profile.tempoBias * (tr.upperBound - tr.lowerBound) + tempoDrift, tr.lowerBound), tr.upperBound)
+        if let a = arc, a.tempoBlend < 1 {
+            // ease in from a calmer tempo
+            let start = SessionArc.startTempo(for: mode)
+            target = start + (target - start) * a.tempoBlend
+        }
+        let arcSoft = (1 - (arc?.energy ?? 1)) * 0.08
 
         let vr = mode.profile.velocityRange
         let lo = Double(vr.lowerBound), span = Double(vr.upperBound - vr.lowerBound)
@@ -364,7 +391,7 @@ public final class Composer {
                 let arch = sin(.pi * p)
                 var base: Double
                 switch role { case .melody: base = 0.6; case .counter: base = 0.42; case .bass: base = 0.42; case .inner: base = 0.27 }
-                var v = lo + span * (base + 0.12 * arch)
+                var v = lo + span * (base + 0.12 * arch - arcSoft)
                 switch n.kind {
                 case .ornament: v -= 5
                 case .resolution: v -= 2

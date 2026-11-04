@@ -1,7 +1,7 @@
 import Foundation
 import CadenceCore
 
-// Usage: cadence-render [--mode focus|relax|sleep] [--style minimalist|impressionist|romantic|baroque|varied]
+// Usage: cadence-render [--ease-in MINUTES] [--pulse-lock] [--mode focus|relax|sleep] [--style minimalist|impressionist|romantic|baroque|varied]
 //                       [--seconds N] [--no-am] [--noise] [--seed N] [--rate HZ] out.wav
 var args = Array(CommandLine.arguments.dropFirst())
 var p = EngineParams()
@@ -14,6 +14,8 @@ if let s = take("--style") { p.style = CompositionStyle(rawValue: s) }
 if let s = take("--seconds"), let d = Double(s) { seconds = d }
 if let s = take("--seed"), let d = UInt64(s) { seed = d }
 if let s = take("--rate"), let d = Double(s) { p.rateHz = d }
+if let s = take("--ease-in"), let d = Double(s) { p.inductionMinutes = d; p.breathSwell = true }
+if let i = args.firstIndex(of: "--pulse-lock") { p.tempoLock = true; args.remove(at: i) }
 if let i = args.firstIndex(of: "--no-am") { p.amEnabled = false; args.remove(at: i) }
 if let i = args.firstIndex(of: "--noise") { p.noiseEnabled = true; args.remove(at: i) }
 if let f = args.first { out = f }

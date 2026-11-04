@@ -24,9 +24,11 @@ if cmd == "score" {
 
 if cmd == "debug" {
     let style = CompositionStyle(rawValue: args.count > 2 ? args[2] : "romantic")!
-    let c = Composer(mode: .focus, style: style, seed: 5)
+    let seed = UInt64(args.count > 3 ? args[3] : "5") ?? 5
+    let c = Composer(mode: .focus, style: style, seed: seed)
     var bars: [Bar] = []
-    for _ in 0..<1200 { bars.append(c.nextBar()) }
+    var mins = 0.0
+    while mins < 30 { let b = c.nextBar(); bars.append(b); mins += Double(b.beats) / b.tempo }
     var shown = 0
     var mel: [(Bar, GeneratedNote)] = []
     for b in bars { for n in b.notes where n.voice == .melody { mel.append((b, n)) } }
@@ -36,10 +38,11 @@ if cmd == "debug" {
         let nct = !bc.chord.pcs.contains(pc)
         let ook = nct && !bc.scale.pcs.contains(pc) && !bc.key.contains(pc)
         let unres = nct && (i + 1 >= mel.count || abs(mel[i + 1].1.midi - n.midi) > 2)
-        if (ook || unres) && shown < 14 {
+        let leap = i + 1 < mel.count && abs(mel[i + 1].1.midi - n.midi) > 12
+        if (ook || unres || leap) && shown < 14 {
             shown += 1
             let ctx = mel[max(0, i - 2)...min(mel.count - 1, i + 2)].map { "\($0.1.midi)\($0.1.kind.rawValue.prefix(3))@\($0.0.index):\($0.1.beat)" }.joined(separator: " ")
-            print("\(b.section) [\(b.chords.map { "\($0.chord.symbol)@\($0.beat)" }.joined(separator: ","))] \(ook ? "OOK" : "UNRES") bar \(b.index) beat \(n.beat) \(n.midi) \(n.kind) chord \(bc.chord.symbol) key \(b.keyName) | \(ctx)")
+            print("\(b.section) [\(b.chords.map { "\($0.chord.symbol)@\($0.beat)" }.joined(separator: ","))] \(ook ? "OOK" : (unres ? "UNRES" : "LEAP")) bar \(b.index) beat \(n.beat) \(n.midi) \(n.kind) chord \(bc.chord.symbol) key \(b.keyName) | \(ctx)")
         }
     }
     // voices too

@@ -86,7 +86,8 @@ public enum CompositionAnalysis {
         for i in melody.indices {
             if melody[i].nct {
                 r.melodyNonChordTones += 1
-                if i + 1 >= melody.count || abs(melody[i + 1].midi - melody[i].midi) > 2 { r.unresolvedDissonances += 1 }
+                // (the final note of an excerpt resolves beyond it, so it isn't counted)
+                if i + 1 < melody.count && abs(melody[i + 1].midi - melody[i].midi) > 2 { r.unresolvedDissonances += 1 }
             }
             if i > 0 {
                 let d = abs(melody[i].midi - melody[i - 1].midi)

@@ -81,9 +81,21 @@ struct MainView: View {
             .disabled(player.isLoading)
             .accessibilityLabel(player.isPlaying ? "Stop" : "Start")
             .accessibilityHint("Space bar also starts and stops")
-            if let r = player.remaining, player.isPlaying {
-                Text(formatTime(r)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    .offset(y: 72).accessibilityLabel("\(formatTime(r)) remaining")
+            if player.state == .playing {
+                VStack(spacing: 2) {
+                    if player.settings.inductionMinutes > 0 || player.arcPhase == .windingDown {
+                        Text(player.arcPhase.title(for: player.settings.mode))
+                            .font(.caption.weight(.medium)).foregroundStyle(player.settings.mode.tint)
+                            .contentTransition(.opacity)
+                            .animation(.easeInOut(duration: 1), value: player.arcPhase)
+                    }
+                    if let r = player.remaining {
+                        Text(formatTime(r)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            .accessibilityLabel("\(formatTime(r)) remaining")
+                    }
+                }
+                .offset(y: 113)
+                .accessibilityElement(children: .combine)
             }
         }
     }

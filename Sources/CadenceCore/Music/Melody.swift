@@ -141,6 +141,7 @@ final class MelodyComposer {
         var prevBass: Int? = nil
         var motifCounter = 0
         var repeats = 0
+        var openingPitch: Int? = prefix.first?.midi
         var slotPitch: [Int: Int] = [:]   // melody pitch at each harmony change, for outer-voice checks
         let motifBars: Set<Int> = plan.bars <= 4 ? [0, 2] : [0, 2]
         for (k, i) in structIdx.enumerated() {
@@ -190,6 +191,8 @@ final class MelodyComposer {
                     let a = mod12(pm - pb), b2 = mod12(m - bass)
                     if pm != m && pb != bass && a == b2 && (a == 0 || a == 7) && (m - pm).signum() == (bass - pb).signum() { c += 12 }
                 }
+                // an antecedent's cadence stays near its opening register, so the restatement flows on
+                if isFinal && role == .antecedent, let o = openingPitch { c += Double(max(0, abs(m - o) - 7)) * 0.9 }
                 if isPenult && plan.cadence == .authentic {
                     let pc = mod12(m)
                     if pc == finalKey.pc(1) || pc == finalKey.pc(6) { c -= 1.2 }
@@ -201,6 +204,7 @@ final class MelodyComposer {
             repeats = best == prev ? repeats + 1 : 0
             prev = best
             if abs(n.beat - slot.start) < 1e-6 || slotPitch[si] == nil { slotPitch[si] = best }
+            if openingPitch == nil { openingPitch = best }
             prevBass = bass
             notes[i].midi = best
         }

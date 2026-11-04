@@ -59,7 +59,7 @@ struct MenuBarView: View {
     private var subtitle: String {
         if player.isLoading { return "Tuning the piano…" }
         if player.isPlaying {
-            let k = player.status.keyName
+            let k = player.settings.inductionMinutes > 0 ? player.arcPhase.title(for: player.settings.mode) : player.status.keyName
             if let r = player.remaining { return "\(k) · \(formatTime(r)) left" }
             return k.isEmpty ? "Beginning…" : k
         }
