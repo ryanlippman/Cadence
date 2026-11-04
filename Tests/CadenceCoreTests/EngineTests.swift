@@ -6,16 +6,17 @@ final class EngineTests: XCTestCase {
     let sr = SynthCore.internalSampleRate
 
     func testOutputIsCleanBoundedAndClickFree() {
-        for style in CompositionStyle.allCases {
-            let core = SynthCore(bank: EngineTests.bank, seed: 2, style: style)
-            var p = EngineParams(); p.style = style; p.volume = 1; p.amEnabled = false
+        for style in CompositionStyle.allCases { for mode in FocusMode.allCases {
+            let core = SynthCore(bank: EngineTests.bank, seed: 2, style: style, mode: mode)
+            var p = EngineParams(); p.style = style; p.mode = mode; p.rateHz = mode.defaultRate
+            p.volume = 1; p.intensity = 1; p.rampInSeconds = 0.01
             core.setParams(p); core.startSession(fadeInSeconds: 0.5)
-            let x = core.renderOffline(seconds: 40).left
+            let x = core.renderOffline(seconds: 45).left
             XCTAssertFalse(AudioAnalysis.hasNonFinite(x))
             XCTAssertLessThanOrEqual(AudioAnalysis.peak(x), 0.996)
-            XCTAssertEqual(AudioAnalysis.clickCount(Array(x[Int(sr)...])).count, 0, "\(style)")
+            XCTAssertEqual(AudioAnalysis.clickCount(Array(x[Int(sr)...])).count, 0, "\(style) \(mode)")
             XCTAssertEqual(core.debugSteals, 0, "\(style) never needs hard voice stealing")
-        }
+        }}
     }
 
     func testModeSwitchKeepsMusicPlaying() {
@@ -29,6 +30,24 @@ final class EngineTests: XCTestCase {
         let st = AudioAnalysis.shortTermDB(Array(x[Int(sr * 10)...]), sampleRate: sr, window: 1.0, hop: 0.25)
         XCTAssertGreaterThan(st.min()!, AudioAnalysis.percentile(st, 0.5) - 18, "no silence gap at the switch")
         XCTAssertEqual(AudioAnalysis.clickCount(Array(x[Int(sr * 20)..<Int(sr * 32)])).count, 0)
+    }
+
+    func testAfterSwitchingToSleepTheModulationRunsAtTheSleepRate() {
+        func tail(am: Bool) -> [Double] {
+            let core = SynthCore(bank: EngineTests.bank, seed: 4, style: .romantic)
+            var p = EngineParams(); p.rampInSeconds = 0.01; p.intensity = 1; p.amEnabled = am
+            core.setParams(p); core.startSession(fadeInSeconds: 0.01)
+            _ = core.renderOffline(seconds: 20)
+            p.mode = .sleep; p.rateHz = FocusMode.sleep.defaultRate
+            core.setParams(p)
+            let x = core.renderOffline(seconds: 40).left
+            return AudioAnalysis.envelope(Array(x[Int(sr * 10)...]), sampleRate: sr)
+        }
+        let on = tail(am: true), off = tail(am: false)
+        let at25 = AudioAnalysis.envelopeMagnitude(on, envRate: 500, at: 2.5) / AudioAnalysis.envelopeMagnitude(off, envRate: 500, at: 2.5)
+        let at16 = AudioAnalysis.envelopeMagnitude(on, envRate: 500, at: 16) / AudioAnalysis.envelopeMagnitude(off, envRate: 500, at: 16)
+        XCTAssertGreaterThan(at25, 4, "modulation energy now at 2.5 Hz")
+        XCTAssertLessThan(at16, 1.5, "and no longer at the Focus rate")
     }
 
     func testFadeOutAndResume() {

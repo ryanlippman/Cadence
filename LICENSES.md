@@ -8,11 +8,13 @@
 - **License:** Creative Commons Attribution 3.0 Unported — https://creativecommons.org/licenses/by/3.0/
   (stated in the archive's `readme.txt` and in the `.sfz` header: "License: CC-by"). CC BY permits
   redistribution and adaptation, including inside an app, provided credit is given and changes are indicated.
-- **Changes made:** a subset of 22 pitches (A1–C7, every minor third) × 3 velocity layers (original
-  layers 4, 7 and 10 of 16) was selected, trimmed to 5–10 s, faded out, resampled to 44.1 kHz and
-  encoded as AAC 96 kbps (`Scripts/prepare_samples.sh`). Notes between recorded pitches are produced
-  by pitch-shifting at playback.
-- **In-app credit:** "About & Attribution" in the main window.
+- **Changes made** (`Scripts/prepare_samples.sh`):
+  - subset of 22 pitches (A1–C7, every minor third) × 4 velocity layers (original layers 3, 5, 7, 9 of 16);
+  - the 22 matching release ("hammer/damper") noise samples;
+  - trimmed by register (4–10 s; release noises 1.5 s), 1.5 s fade-out, resampled to 44.1 kHz/16-bit,
+    stored as Apple Lossless (ALAC). No lossy encoding.
+  - At playback, notes between recorded pitches are pitch-shifted; leading silence is skipped.
+- **In-app credit:** About sheet (ⓘ in the main window) and Settings → About.
 - No samples from commercial libraries are used.
 
 ## Cadence source code

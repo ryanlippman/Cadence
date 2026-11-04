@@ -131,8 +131,9 @@ let si = Int((35.0 - 6) / 0.1)
 let before = AudioAnalysis.percentile(Array(st[(si - 60)..<si]), 0.5)
 let during = Array(st[si..<min(st.count, si + 60)]).min() ?? 0
 let tail = Array(trX[Int(sr * (75 - 6 - 20))...])
-let tailPk = AudioAnalysis.envelopePeak(AudioAnalysis.envelope(tail, sampleRate: sr), envRate: 500, band: 1...4, step: 0.02)
-md += "\n## Mode transition (Focus → Sleep at 35 s, Romantic)\n\nMedian level before \(f1(before)) dBFS; lowest 0.4 s window in the 6 s after the switch \(f1(during)) dBFS (music continues, no gap); clicks over the whole render \(tr.clicks); modulation peak in the last 20 s \(f2(tailPk.freq)) Hz (×\(Int(tailPk.prominence))).\n"
+let tailEnv = AudioAnalysis.envelope(tail, sampleRate: sr)
+let tailPk = AudioAnalysis.envelopePeak(tailEnv, envRate: 500, band: 1.5...4, step: 0.02)
+md += "\n## Mode transition (Focus → Sleep at 35 s, Romantic)\n\nMedian level before \(f1(before)) dBFS; lowest 0.4 s window in the 6 s after the switch \(f1(during)) dBFS (music continues, no gap); clicks over the whole render \(tr.clicks); modulation peak (1.5–4 Hz) in the last 20 s \(f2(tailPk.freq)) Hz (×\(Int(tailPk.prominence))). In Sleep the music's own beat (~1 Hz) shares this band, so the AM on/off ratio is the meaningful measure (tested ≥ 4×).\n"
 
 // composition
 md += "\n## Composition (Composer only, ~60 min per style, seed 5)\n\n| Style | Bars | Min | Notes/bar (mel/ctr/bass/inner) | Out-of-key | Chromatic % | Melody NCT % | Unresolved | Outer ∥5/8 | Mean |interval| | Leaps>6th | Static runs | Key changes | Distinct chords | Unique 4-bar windows | Tempo | Velocity |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"

@@ -33,6 +33,9 @@ struct Voice {
     var fadeCoef: Float = 0.99
     var age = 0
     var isRelease = false
+    /// Samples of fade-in remaining (voices start just before the attack, where the waveform is not
+    /// exactly zero; a 1 ms ramp prevents a tiny step).
+    var fadeIn = 0
 }
 
 /// Polyphonic piano sample player.
@@ -59,6 +62,7 @@ public final class Sampler {
     private var rng: UInt32 = 0x9E3779B9
     var releaseNoiseLevel: Float = 0.014   // −37 dB
     static let undampedFrom = 89
+    private var fadeInLength: Int { Int(sampleRate * 0.001) }
 
     public init(bank: SampleBank, sampleRate: Double) {
         self.bank = bank
@@ -125,7 +129,8 @@ public final class Sampler {
                           gLo: (1 - w) * target / zLo.attackRMS, gHi: w * target / zHi.attackRMS,
                           pos: Double(zLo.startOffset), rate: pow(2.0, (Double(midi - center) + detuneCents / 100) / 12.0) * (zLo.sampleRate / sampleRate),
                           hold: max(1, holdSamples), env: 1, dampAge: 0,
-                          fastCoef: coef(0.03 * damp), slowCoef: coef(0.22 * damp), fadeCoef: 1, age: 0, isRelease: false)
+                          fastCoef: coef(0.03 * damp), slowCoef: coef(0.22 * damp), fadeCoef: 1, age: 0, isRelease: false,
+                          fadeIn: fadeInLength)
         lastVelocity[midi] = Float(velocity)
     }
     private var lastVelocity = [Float](repeating: 40, count: 128)
@@ -137,7 +142,7 @@ public final class Sampler {
         let ref = bank.zones[bank.layerTable[bank.nearest[midi] * SampleBank.maxLayers]].attackRMS
         let g = releaseNoiseLevel * 0.05 * powf(lastVelocity[midi] / 40, 1.3) / ref * level
         voices[s] = Voice(state: .held, midi: midi, lo: z, hi: nil, gLo: g, gHi: 0, pos: 0, rate: z.sampleRate / sampleRate,
-                          hold: Int.max / 2, env: 1, fadeCoef: 1, age: 0, isRelease: true)
+                          hold: Int.max / 2, env: 1, fadeCoef: 1, age: 0, isRelease: true, fadeIn: fadeInLength)
     }
 
     private func startDamping(_ i: Int) {
@@ -198,7 +203,13 @@ public final class Sampler {
                     l += hermite(h.left, h.frames, v.pos) * v.gHi
                     r += hermite(h.right, h.frames, v.pos) * v.gHi
                 }
-                outL[f] += l * v.env; outR[f] += r * v.env
+                var e = v.env
+                if v.fadeIn > 0 {
+                    let n = Float(fadeInLength)
+                    e *= (n - Float(v.fadeIn)) / n
+                    v.fadeIn -= 1
+                }
+                outL[f] += l * e; outR[f] += r * e
                 v.pos += v.rate
                 switch v.state {
                 case .held:

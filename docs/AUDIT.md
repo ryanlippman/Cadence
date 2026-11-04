@@ -34,3 +34,22 @@ The custom engine is retained and extended. AVAudioUnitSampler cannot be rendere
 offline alongside our own DSP for the spectrum tests, offers no damper/pedal model, sympathetic
 resonance, per-note micro-variation, or release-trigger layers without EXS/SF2 authoring, and makes
 sample-accurate scheduling from our generator harder. CPU cost of the custom path is <2 % of one core.
+
+## Status after Phase 2
+| # | Finding | Resolution |
+|---|---------|------------|
+| 1 | Lossy-codec spikes | ALAC samples; test asserts no spikes in any zone; 0 clicks in every style × mode render |
+| 2 | Not composed | Hierarchical composer (form, periods, functional harmony, voice leading, motifs, memory, counterpoint) |
+| 3 | No pedal model | Key/pedal/damper model, legato re-pedalling, sympathetic resonance, release noise |
+| 4 | RT safety | Precomputed lookup tables, no audio-thread allocation, split locks, control via copied state |
+| 5 | Gain staging | Look-ahead limiter (inactive at normal levels), measured level targets |
+| 6 | Mode transitions | Rate dip-and-switch; tempo/dynamics glide; no silence gap (tested) |
+| 7 | Device changes | Fixed internal rate; engine restart keeps the composition |
+| 8 | Settings | Tolerant decoding; diagnostics never write user defaults |
+| 9 | UI | Redesigned window, Settings, onboarding, visualiser, menu bar, accessibility |
+| 10 | Reverb | 8-line FDN with early reflections and modulated delays |
+
+Additional issues found and fixed during Phase 2: velocity-layer cross-fades phase-cancelled (now nearest
+layer); hard clip at full volume (look-ahead limiter); non-deterministic composition across processes
+(dictionary iteration order); consequent phrases copying melody over harmony the cadence had replaced;
+turn ornaments creating cross-relations with the preceding chord.
