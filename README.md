@@ -28,7 +28,7 @@ rhythmic sound and attention, gently pulses the mix at a rate chosen for each mo
 
 ## Highlights
 
-| | |
+| Feature | What it does |
 |---|---|
 | 🎹 **Never the same piece twice** | Four styles: Minimalist, Impressionist, Romantic and Baroque. Each piece has a real form: themes, contrasts, modulations, cadences. |
 | 🌊 **Modulation that fits you** | Focus (16 Hz), Relax (9 Hz) and Sleep (2.5 Hz). Gentle, Standard or **Strong**. Four waveshapes, alternating stereo, bass-steady option. |
