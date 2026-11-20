@@ -1,14 +1,103 @@
-# Cadence
+<div align="center">
 
-A native macOS (14+) app that composes calm, original classical-style piano music in real time, forever,
-with an optional rhythmic amplitude-modulation layer. Everything runs offline on your Mac.
+<img src="docs/images/hero.png" alt="Cadence: endless original piano music, composed as you listen" width="100%">
 
-> **Honest framing.** The modulation layer is *inspired by published research on rhythmic auditory
-> stimulation* (amplitude-modulated sound at specific rates). Effects on focus, relaxation or sleep **vary
-> between people**, and some people notice nothing. Cadence is not a medical device and makes no medical or
-> therapeutic claims. Switch the modulation off in Settings if you simply want the piano.
+<br>
 
-## How it works
+**Endless, original, calm piano music, composed in real time on your Mac, with optional rhythmic modulation for focus, relaxation and sleep.**
+
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111?logo=apple&logoColor=white)](#install)
+[![Swift](https://img.shields.io/badge/Swift-SwiftUI%20%2B%20AVAudioEngine-F05138?logo=swift&logoColor=white)](Package.swift)
+[![Offline](https://img.shields.io/badge/runs-100%25%20offline-5a67d8)](#privacy)
+[![Tests](https://img.shields.io/badge/tests-50%20passing-2ea44f)](Tests)
+[![License: GPL-3.0](https://img.shields.io/badge/code-GPL--3.0-blue)](LICENSE)
+[![Samples: CC BY 3.0](https://img.shields.io/badge/samples-CC%20BY%203.0-lightgrey)](LICENSES.md)
+
+</div>
+
+---
+
+Cadence is a native macOS app that **composes** piano music as you listen. It doesn't play back recordings or
+loops. A rules-based composer writes themes, harmonies and counter-melodies bar by bar, forever, and a sampled
+concert grand plays them. Underneath, an optional amplitude-modulation layer, inspired by published research on
+rhythmic sound and attention, gently pulses the mix at a rate chosen for each mode.
+
+> **Honest framing.** Effects on focus, relaxation or sleep **vary between people**, and some people notice
+> nothing. Cadence is not a medical device and makes no medical or therapeutic claims. Turn the modulation off
+> any time if you simply want the piano.
+
+## Highlights
+
+| | |
+|---|---|
+| 🎹 **Never the same piece twice** | Four styles: Minimalist, Impressionist, Romantic and Baroque. Each piece has a real form: themes, contrasts, modulations, cadences. |
+| 🌊 **Modulation that fits you** | Focus (16 Hz), Relax (9 Hz) and Sleep (2.5 Hz). Gentle, Standard or **Strong**. Four waveshapes, alternating stereo, bass-steady option. |
+| 🌅 **Eases you in** | Starts shallow, slow and sparse, then deepens over 5–15 minutes. Timed sessions wind down before they fade out. |
+| 🤫 **Built to be ignorable** | Salience reduction: no sudden accents, gaps, texture jumps, shrill notes or repeated-note runs. All measured. |
+| 🎨 **Names and cover art** | Every piece gets a unique name (*Compasses on the Hill*) and its own generated cover, shown in Now Playing too. |
+| 🔒 **Native and private** | SwiftUI + AVAudioEngine, a few percent CPU, no network, no account, no analytics. |
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/light-dark.png" alt="The Cadence window in light and dark appearance" width="80%">
+</p>
+<p align="center"><sub>The main window follows your system appearance: piece name and cover, mode, style, intensity, strength, volume and session length.</sub></p>
+
+<p align="center">
+  <img src="docs/images/settings.png" alt="Settings, Flow tab, in light and dark" width="90%">
+</p>
+<p align="center"><sub>Settings → Flow: session ease-in, pulse-locking, breathing swells, slow variation and headphone spatialisation.</sub></p>
+
+<p align="center">
+  <img src="docs/images/covers.png" alt="Generated cover art for every style and mode" width="70%">
+</p>
+<p align="center"><sub>Every piece is drawn procedurally: style picks the motif, mode the colour family, key the hue.</sub></p>
+
+## Install
+
+Requires macOS 14 or later and **Xcode** (the Command Line Tools alone can't build SwiftUI apps).
+
+```bash
+git clone https://github.com/ryanlippman/Cadence.git
+cd Cadence
+Scripts/build_app.sh          # builds build/Cadence.app (about 22 MB, samples included)
+open build/Cadence.app
+```
+
+The app is ad-hoc signed, not notarized. If Gatekeeper complains, right-click the app and choose **Open**.
+Drag it to `/Applications` to keep it.
+
+**Using it:** press Space (or the big button) to start and stop. Use ⌘1/⌘2/⌘3 for Focus, Relax and Sleep.
+Cadence also lives in the menu bar, and media keys and Control Centre's Now Playing work too.
+
+## The research behind it
+
+Cadence's techniques follow ideas from published work. It applies them as design choices, not as proven
+interventions:
+
+- **Rhythmic amplitude modulation and attention:** beta-rate (≈12–20 Hz) modulation in background music
+  reduced attentional lapses in sustained-attention tasks (Woods et al., 2019). Stronger modulation helped
+  most for listeners reporting more attention difficulties (Woods et al., 2024). Neural entrainment as a
+  substrate of attention is reviewed in Calderone et al. (2014).
+- **Preferred stimulation differs between people:** introverts and extraverts differ in preferred arousal
+  (Geen, 1984) and in how much background music distracts them (Furnham & Bradley, 1997). Arousal
+  regulation also differs in ADHD (Strauß et al., 2018). *Hence the Gentle / Standard / Strong presets.*
+- **Salience:** sudden, surprising sounds capture attention (auditory saliency models; Kayser et al., 2005).
+  *Hence the composer's smoothing of accents, density, register and texture.*
+- **Externalised sound:** crossfeed and early reflections make headphone audio seem to come from in front of
+  you rather than inside your head.
+
+Cadence is an independent project with no affiliation to any company mentioned in this literature.
+
+## Privacy
+
+Everything runs locally. Cadence makes no network requests and collects nothing. Settings and the list of
+used piece names are stored in your user defaults on this Mac.
+
+---
+
+## Under the hood
 
 ```
 Composer ─ bars ─▶ scheduler ─ note/pedal events ─▶ Sampler ─▶ sympathetic resonance ─▶ FDN reverb
@@ -17,7 +106,9 @@ Composer ─ bars ─▶ scheduler ─ note/pedal events ─▶ Sampler ─▶ s
                        limiter ◀─ master volume / fades ◀─ pink-noise bed ◀─ amplitude modulation (LFO)
 ```
 
-### Composition (`Sources/CadenceCore/Music`)
+<details>
+<summary><b>Composition engine (rules-based, no ML)</b></summary>
+
 Hierarchical, rules-based — no machine learning, no recordings:
 
 - **Form.** Each *movement* is: theme (a period), often a varied restatement, a pivot-chord transition to a
@@ -45,7 +136,11 @@ Hierarchical, rules-based — no machine learning, no recordings:
 - **Modes** are orthogonal to style: Focus 64–76 BPM, Relax 58–68, Sleep 55–60 (softer, sparser, darker
   reverb). Switching mode glides tempo and dynamics over a few bars.
 
-### Piano (`Sampler.swift`, `DSP.swift`)
+</details>
+
+<details>
+<summary><b>Piano sampler and DSP</b></summary>
+
 - Custom sampler (kept instead of `AVAudioUnitSampler`: deterministic offline rendering for the analysis
   tests, a real pedal/damper model, release triggers, and sample-accurate scheduling).
 - Lossless Salamander subset, 4 velocity layers chosen by nearest layer with continuous, loudness-normalised
@@ -56,7 +151,11 @@ Hierarchical, rules-based — no machine learning, no recordings:
 - Sympathetic resonance (24 tuned strings ring while the pedal is down); 8-line FDN reverb with early
   reflections and modulated delays; per-mode reverb time.
 
-### Modulation & output
+</details>
+
+<details>
+<summary><b>Modulation options</b></summary>
+
 - Sample-accurate LFO on the full mix after the reverb (so reverb tails don't blur it); double-precision phase,
   no drift (tested over 10 minutes); smoothed depth; large rate changes (e.g. Focus → Sleep) dip out, switch
   and fade back in rather than sweeping audibly.
@@ -83,7 +182,11 @@ Hierarchical, rules-based — no machine learning, no recordings:
 - Optional pink-noise bed (high- and low-passed), look-ahead limiter (inactive at normal levels), squared
   volume and fade curves.
 
-### Session arc & flow techniques (`SessionArc.swift`, Settings → Flow)
+</details>
+
+<details>
+<summary><b>Session arc, flow and salience techniques</b></summary>
+
 Sessions no longer start at full strength:
 
 - **Ease-in** (Off / 5 / 10 / 15 min, default 10): modulation depth starts at 20 % and the rate starts lower
@@ -109,19 +212,22 @@ These are design choices inspired by research on rhythm, arousal and attention; 
 particular mental state, and how they feel varies between people. Try the arc offline:
 `swift run -c release cadence-render --ease-in 3 --pulse-lock --seconds 240 demo.wav`.
 
-### Pieces, names and cover art
-Each movement is a "piece" with a unique generated name (e.g. *Lanterns on Still Water*), a form-and-key
-subtitle (*Nocturne in E♭ major*) and procedurally drawn cover art (style sets the motif, mode the colour
-family, key the hue). They appear in the window, the menu bar and macOS Now Playing; names are never reused.
+</details>
 
-### Engine & reliability
+<details>
+<summary><b>Engine and reliability</b></summary>
+
 - Fixed 48 kHz internal rate; the mixer converts to the device rate. Output changes restart the engine
   without resetting the music.
 - Audio thread: no allocation, no blocking (try-locks only), events dispatched at their exact sample.
   Composition runs on a background queue under its own lock.
 - Sleep prevention via an IOKit power assertion while playing; Now Playing + media keys.
 
-## Build, test, run
+</details>
+
+
+## Development
+
 
 ```bash
 swift build
@@ -138,8 +244,10 @@ swift run -c release cadence-analyze score romantic 32      # bar-by-bar harmony
 swift run -c release cadence-render --style impressionist --mode sleep --seconds 120 out.wav
 ```
 Regenerating samples: `Scripts/prepare_samples.sh <extracted Salamander SFZ+FLAC dir>` (needs ffmpeg).
+Regenerate the README images: `build/Cadence.app/Contents/MacOS/Cadence --snapshot /tmp/snap && swift Scripts/make_showcase.swift /tmp/snap docs/images`.
 
-## Verification
+### Verification
+
 See [docs/AUDIT.md](docs/AUDIT.md) (what was wrong in the first version and what changed) and
 [docs/ANALYSIS.md](docs/ANALYSIS.md) (measured results). Tests cover: notes in key/chord/local scale,
 every melodic dissonance resolving by step, outer-voice parallels < 3 %, cadence correctness, paced
@@ -151,7 +259,8 @@ concurrent control while rendering, a 20-minute stability run, and the session a
 and low depth reaching 16 Hz at full depth, calmer and sparser opening music, ease-out, pulse-lock to a beat
 multiple with < 0.25 rad phase error at bar starts, breathing swell present only while settling).
 
-## Not verified / caveats
+### Not verified / caveats
+
 - **Listening.** All sound judgements here are from measurements (spectra, levels, clicks, voice-leading
   statistics), not human ears. Musical taste — reverb amount, voicing colour, how "composed" it feels over an
   hour — needs listening; renders are produced by `cadence-analyze renders`.
@@ -163,4 +272,8 @@ multiple with < 0.25 rad phase error at bar starts, breathing swell present only
 - Ad-hoc signed only (no notarization); Gatekeeper may ask for right-click → Open.
 
 ## License
-See [LICENSES.md](LICENSES.md). Piano samples: Salamander Grand Piano, Alexander Holm, CC BY 3.0.
+
+- **Code:** [GNU GPL v3.0](LICENSE).
+- **Piano samples:** [Salamander Grand Piano V3](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html)
+  by Alexander Holm, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Subset and conversion details
+  are in [LICENSES.md](LICENSES.md).

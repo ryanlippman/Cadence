@@ -19,5 +19,6 @@
 
 ## Cadence source code
 
-The Cadence source code in this repository is original work by its author; choose a license of your
-own before distributing. The CC BY attribution above must travel with any build that bundles the samples.
+The Cadence source code is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
+The GPL covers the code only. The bundled piano samples remain under CC BY 3.0, as described above, and that
+attribution must travel with any build that bundles them.
